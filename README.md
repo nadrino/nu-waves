@@ -1,4 +1,4 @@
-# Neutrino Interferometry - `nu_waves` Python library
+# Neutrino Interferometry - nu-waves
 
 ## What is it?
 
