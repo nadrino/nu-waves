@@ -14,8 +14,8 @@ from nu_waves.matter.profile import MatterProfile
 import nu_waves.utils.style
 
 
-# import torch
-# Backend.set_api(torch, device='mps') # no eigen decompose in MPS, will fallback to CPU
+import torch
+Backend.set_api(torch, device='mps') # no eigen decompose in MPS, will fallback to CPU
 # Backend.set_api(torch, device='cpu') # fastest
 
 # import jax
@@ -24,7 +24,7 @@ import nu_waves.utils.style
 
 
 E_GeV = np.logspace(-1, 2, 400)     # x
-cosz_binning  = np.linspace(-1.0, 1.0, 200)     # y (upgoing)
+cosz_binning  = np.linspace(-1.0, 1.0, 400)     # y (upgoing)
 prem  = PREMModel()
 
 # choose one:
