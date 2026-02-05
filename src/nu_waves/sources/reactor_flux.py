@@ -67,4 +67,4 @@ class ReactorSpectrum:
                 ff.f239 * S239 +
                 ff.f238 * S238 +
                 ff.f241 * S241)
-        return flux / np.trapz(flux, E_MeV)  # normalize to unit area
+        return flux / np.trapezoid(flux, E_MeV)  # normalize to unit area
