@@ -8,6 +8,7 @@ from nu_waves.globals.backend import Backend
 from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.hamiltonian import matter
+from nu_waves.hamiltonian import vacuum
 from nu_waves.propagation.oscillator import Oscillator
 from nu_waves.matter.prem import PREMModel
 from nu_waves.matter.profile import MatterProfile
@@ -44,7 +45,17 @@ h_matter = matter.Hamiltonian(
     spectrum=Spectrum(n_neutrinos=3, m_lightest=0, dm2=dm2),
     antineutrino=False
 )
-osc = Oscillator(hamiltonian=h_matter)
+
+h_vacuum = vacuum.Hamiltonian(
+    mixing=Mixing(n_neutrinos=3, mixing_angles=angles, dirac_phases=phases),
+    spectrum=Spectrum(n_neutrinos=3, m_lightest=0, dm2=dm2),
+    antineutrino=False
+)
+
+osc = Oscillator(
+    hamiltonian=h_matter
+    # hamiltonian=h_vacuum
+)
 
 # test for thickness
 cosz_profile = prem.profile_from_coszen(+0.3, h_atm_km=15.0)
