@@ -4,6 +4,7 @@ from nu_waves.globals.backend import Backend
 from nu_waves.utils.units import GEV_TO_EV, KM_TO_EVINV
 
 from dataclasses import dataclass
+import numpy as np
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,22 @@ class NeutrinoEventBatch:
     flavor_emit: any
     flavor_det: any
     isAntiNu: any = None
+
+
+@dataclass(frozen=True, slots=True)
+class EventGroup:
+    indices: np.ndarray
+    L_km: np.ndarray
+    E_GeV: np.ndarray
+    flavor_emit: int
+    flavor_det: int
+    isAntiNu: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledEventBatch:
+    n_events: int
+    groups: tuple[EventGroup, ...]
 
 
 def _sample_array(X, n_samples, sampling_fct):
@@ -43,6 +60,13 @@ class Oscillator:
         self.hamiltonian = hamiltonian
 
     def probability(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None):
+        if isinstance(L_km, CompiledEventBatch):
+            if E_GeV is not None or flavor_emit is not None or flavor_det is not None:
+                raise TypeError(
+                    "Compiled event probability calls must only pass the CompiledEventBatch."
+                )
+            return self._probability_compiled(L_km)
+
         if self._is_event_arg(L_km):
             if E_GeV is not None or flavor_emit is not None or flavor_det is not None:
                 raise TypeError(
@@ -78,43 +102,47 @@ class Oscillator:
         return Backend.from_device(self._squeeze_array(out))
 
     def _probability_events(self, events):
-        batch = self._coerce_event_batch(events)
-        xp = Backend.xp()
+        return self._probability_compiled(self.compile_events(events))
 
-        L = xp.asarray(batch.L_km, dtype=Backend.real_dtype()).reshape(-1)
-        E = xp.asarray(batch.E_GeV, dtype=Backend.real_dtype()).reshape(-1)
-        flavor_emit = xp.asarray(batch.flavor_emit).reshape(-1)
-        flavor_det = xp.asarray(batch.flavor_det).reshape(-1)
+    def _probability_compiled(self, compiled_batch: CompiledEventBatch):
+        executor = self.hamiltonian.make_executor(oscillator=self)
+        return executor.probability_compiled(compiled_batch)
+
+    def compile_events(self, events) -> CompiledEventBatch:
+        if isinstance(events, CompiledEventBatch):
+            return events
+
+        batch = self._coerce_event_batch(events)
+
+        L = np.asarray(batch.L_km, dtype=float).reshape(-1)
+        E = np.asarray(batch.E_GeV, dtype=float).reshape(-1)
+        flavor_emit = np.asarray(batch.flavor_emit).reshape(-1)
+        flavor_det = np.asarray(batch.flavor_det).reshape(-1)
         isAntiNu = self._format_event_antinu_arg(batch.isAntiNu, n_events=L.shape[0])
 
         self._validate_event_arrays(L=L, E=E, flavor_emit=flavor_emit, flavor_det=flavor_det, isAntiNu=isAntiNu)
 
-        L = L * KM_TO_EVINV
-        E = E * GEV_TO_EV
+        group_map = {}
+        for index in range(L.shape[0]):
+            key = (bool(isAntiNu[index]), int(flavor_emit[index]), int(flavor_det[index]))
+            group = group_map.setdefault(key, {"indices": [], "L_km": [], "E_GeV": []})
+            group["indices"].append(index)
+            group["L_km"].append(L[index])
+            group["E_GeV"].append(E[index])
 
-        all_flavors = list(range(int(self.hamiltonian.n_neutrinos)))
-        out = xp.zeros((L.shape[0],), dtype=Backend.real_dtype())
+        groups = []
+        for (group_is_antinu, group_flavor_emit, group_flavor_det), values in group_map.items():
+            groups.append(EventGroup(
+                indices=np.asarray(values["indices"], dtype=int),
+                L_km=np.asarray(values["L_km"], dtype=float),
+                E_GeV=np.asarray(values["E_GeV"], dtype=float),
+                flavor_emit=group_flavor_emit,
+                flavor_det=group_flavor_det,
+                isAntiNu=group_is_antinu,
+            ))
 
-        original_antineutrino = self.hamiltonian._antineutrino
-        try:
-            for antineutrino in (False, True):
-                mask = isAntiNu == antineutrino
-                if not bool(Backend.from_device(xp.any(mask))):
-                    continue
-
-                self.hamiltonian.set_antineutrino(antineutrino)
-                probs = self._probability(
-                    L=L[mask],
-                    E=E[mask],
-                    flavor_emit=all_flavors,
-                    flavor_det=all_flavors,
-                )
-                event_idx = xp.asarray(range(probs.shape[0]))
-                out[mask] = probs[event_idx, flavor_emit[mask], flavor_det[mask]]
-        finally:
-            self.hamiltonian.set_antineutrino(original_antineutrino)
-
-        return Backend.from_device(out)
+        groups.sort(key=lambda group: (group.isAntiNu, group.flavor_emit, group.flavor_det))
+        return CompiledEventBatch(n_events=L.shape[0], groups=tuple(groups))
 
     def probability_sampled(self, L_km, E_GeV, n_samples, flavor_emit=None, flavor_det=None, E_sample_fct=None, L_sample_fct=None):
         if E_sample_fct is None and L_sample_fct is None:
@@ -243,13 +271,9 @@ class Oscillator:
         raise TypeError("Expected a list of NeutrinoEvent or a NeutrinoEventBatch.")
 
     def _format_event_antinu_arg(self, isAntiNu, n_events):
-        import numpy as np
-        xp = Backend.xp()
-
         default = bool(self.hamiltonian._antineutrino)
         if isAntiNu is None:
-            values = np.full(int(n_events), default, dtype=bool)
-            return xp.asarray(values)
+            return np.full(int(n_events), default, dtype=bool)
 
         values = np.asarray(isAntiNu, dtype=object)
         if values.ndim == 0:
@@ -260,11 +284,10 @@ class Oscillator:
                 values = np.full(int(n_events), bool(values[0]), dtype=bool)
             elif values.shape[0] != n_events:
                 values = values.astype(bool)
-                return xp.asarray(values)
             else:
                 values = np.asarray([default if value is None else bool(value) for value in values], dtype=bool)
 
-        return xp.asarray(values)
+        return values
 
     def _validate_event_arrays(self, L, E, flavor_emit, flavor_det, isAntiNu):
         n_events = L.shape[0]
@@ -279,11 +302,10 @@ class Oscillator:
         if n_events == 0:
             return
 
-        xp = Backend.xp()
         n_flavors = int(self.hamiltonian.n_neutrinos)
-        if bool(Backend.from_device(xp.any((flavor_emit < 0) | (flavor_emit >= n_flavors)))):
+        if np.any((flavor_emit < 0) | (flavor_emit >= n_flavors)):
             raise ValueError(f"flavor_emit values must be in [0, {n_flavors - 1}].")
-        if bool(Backend.from_device(xp.any((flavor_det < 0) | (flavor_det >= n_flavors)))):
+        if np.any((flavor_det < 0) | (flavor_det >= n_flavors)):
             raise ValueError(f"flavor_det values must be in [0, {n_flavors - 1}].")
 
     def _format_flavor_arg(self, arg):

@@ -3,11 +3,15 @@ from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.state.wave_function import WaveFunction, Basis
 from nu_waves.globals.backend import Backend
+from nu_waves.hamiltonian.executors import VacuumExecutor
 
 
 class Hamiltonian(HamiltonianBase):
     def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
         super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino)
+
+    def make_executor(self, oscillator):
+        return VacuumExecutor(oscillator=oscillator)
 
     def propagate_state(self, psi: WaveFunction, L, E):
         xp = Backend().xp()
@@ -58,4 +62,3 @@ class Hamiltonian(HamiltonianBase):
         S = xp.matmul(U[None, :, :], xp.diag_embed(D))
         S = xp.matmul(S, Ud[None, :, :])
         return S
-

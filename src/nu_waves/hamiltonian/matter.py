@@ -4,6 +4,7 @@ from nu_waves.state.wave_function import WaveFunction, Basis
 from nu_waves.globals.backend import Backend
 from nu_waves.models.mixing import Mixing
 from nu_waves.utils.units import VCOEFF_EV, KM_TO_EVINV
+from nu_waves.hamiltonian.executors import ConstantMatterExecutor, LayeredMatterExecutor
 
 from dataclasses import dataclass
 
@@ -63,6 +64,11 @@ class Hamiltonian(HamiltonianBase):
         self._constant_profile = None
         self._matter_profile = None
         self.set_constant_density(rho_in_g_per_cm3=0)
+
+    def make_executor(self, oscillator):
+        if self._matter_profile is None:
+            return ConstantMatterExecutor(oscillator=oscillator)
+        return LayeredMatterExecutor(oscillator=oscillator)
 
     def set_constant_density(self, rho_in_g_per_cm3: float, Ye: float = 0.5):
         self._constant_profile = (rho_in_g_per_cm3, Ye)
