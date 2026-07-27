@@ -138,6 +138,69 @@ def test_event_probability_batch_matches_legacy_channels():
     print("test_event_probability_batch_matches_legacy_channels: success.")
 
 
+def test_event_probability_mixed_antinu_batch_matches_legacy_channels():
+    print("test_event_probability_mixed_antinu_batch_matches_legacy_channels test...")
+    batch = NeutrinoEventBatch(
+        L_km=np.array([295, 295, 295, 295]),
+        E_GeV=np.array([0.6, 0.8, 1.0, 2.0]),
+        flavor_emit=np.array([muon, muon, muon, electron]),
+        flavor_det=np.array([electron, electron, muon, tau]),
+        isAntiNu=np.array([False, True, True, False]),
+    )
+
+    original_antineutrino = h._antineutrino
+    P_events = osc.probability(batch)
+    assert h._antineutrino == original_antineutrino
+
+    P_expected = np.zeros(batch.L_km.shape[0])
+    for antineutrino in (False, True):
+        mask = batch.isAntiNu == antineutrino
+        h.set_antineutrino(antineutrino)
+        P_all = osc.probability(
+            L_km=batch.L_km[mask],
+            E_GeV=batch.E_GeV[mask],
+            flavor_emit=None,
+            flavor_det=None,
+        )
+        P_expected[mask] = P_all[
+            np.arange(np.count_nonzero(mask)),
+            batch.flavor_emit[mask],
+            batch.flavor_det[mask],
+        ]
+
+    h.set_antineutrino(original_antineutrino)
+    np.testing.assert_allclose(P_events, P_expected, atol=1e-14)
+    print("test_event_probability_mixed_antinu_batch_matches_legacy_channels: success.")
+
+
+def test_event_probability_list_antinu_defaults_to_global_flag():
+    print("test_event_probability_list_antinu_defaults_to_global_flag test...")
+    events = [
+        NeutrinoEvent(L_km=295, E_GeV=0.6, flavor_emit=muon, flavor_det=electron),
+        NeutrinoEvent(L_km=295, E_GeV=1.0, flavor_emit=muon, flavor_det=muon),
+    ]
+
+    original_antineutrino = h._antineutrino
+    try:
+        h.set_antineutrino(True)
+        P_events = osc.probability(events)
+        P_all = osc.probability(
+            L_km=[event.L_km for event in events],
+            E_GeV=[event.E_GeV for event in events],
+            flavor_emit=None,
+            flavor_det=None,
+        )
+    finally:
+        h.set_antineutrino(original_antineutrino)
+
+    P_expected = np.array([
+        P_all[i, event.flavor_emit, event.flavor_det]
+        for i, event in enumerate(events)
+    ])
+    np.testing.assert_allclose(P_events, P_expected, atol=1e-14)
+    print("test_event_probability_list_antinu_defaults_to_global_flag: success.")
+
+
 def test_event_probability_rejects_extra_arguments():
     print("test_event_probability_rejects_extra_arguments test...")
     events = [NeutrinoEvent(L_km=295, E_GeV=0.6, flavor_emit=muon, flavor_det=electron)]
@@ -155,4 +218,6 @@ test_zero_baseline_identity()
 test_probability_conservation()
 test_event_probability_list_matches_legacy_channels()
 test_event_probability_batch_matches_legacy_channels()
+test_event_probability_mixed_antinu_batch_matches_legacy_channels()
+test_event_probability_list_antinu_defaults_to_global_flag()
 test_event_probability_rejects_extra_arguments()

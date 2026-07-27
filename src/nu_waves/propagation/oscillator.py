@@ -12,6 +12,7 @@ class NeutrinoEvent:
     E_GeV: float
     flavor_emit: int
     flavor_det: int
+    isAntiNu: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,7 @@ class NeutrinoEventBatch:
     E_GeV: any
     flavor_emit: any
     flavor_det: any
+    isAntiNu: any = None
 
 
 def _sample_array(X, n_samples, sampling_fct):
@@ -83,16 +85,34 @@ class Oscillator:
         E = xp.asarray(batch.E_GeV, dtype=Backend.real_dtype()).reshape(-1)
         flavor_emit = xp.asarray(batch.flavor_emit).reshape(-1)
         flavor_det = xp.asarray(batch.flavor_det).reshape(-1)
+        isAntiNu = self._format_event_antinu_arg(batch.isAntiNu, n_events=L.shape[0])
 
-        self._validate_event_arrays(L=L, E=E, flavor_emit=flavor_emit, flavor_det=flavor_det)
+        self._validate_event_arrays(L=L, E=E, flavor_emit=flavor_emit, flavor_det=flavor_det, isAntiNu=isAntiNu)
 
         L = L * KM_TO_EVINV
         E = E * GEV_TO_EV
 
         all_flavors = list(range(int(self.hamiltonian.n_neutrinos)))
-        probs = self._probability(L=L, E=E, flavor_emit=all_flavors, flavor_det=all_flavors)
-        event_idx = xp.asarray(range(L.shape[0]))
-        out = probs[event_idx, flavor_emit, flavor_det]
+        out = xp.zeros((L.shape[0],), dtype=Backend.real_dtype())
+
+        original_antineutrino = self.hamiltonian._antineutrino
+        try:
+            for antineutrino in (False, True):
+                mask = isAntiNu == antineutrino
+                if not bool(Backend.from_device(xp.any(mask))):
+                    continue
+
+                self.hamiltonian.set_antineutrino(antineutrino)
+                probs = self._probability(
+                    L=L[mask],
+                    E=E[mask],
+                    flavor_emit=all_flavors,
+                    flavor_det=all_flavors,
+                )
+                event_idx = xp.asarray(range(probs.shape[0]))
+                out[mask] = probs[event_idx, flavor_emit[mask], flavor_det[mask]]
+        finally:
+            self.hamiltonian.set_antineutrino(original_antineutrino)
 
         return Backend.from_device(out)
 
@@ -218,16 +238,42 @@ class Oscillator:
                 E_GeV=[event.E_GeV for event in events],
                 flavor_emit=[event.flavor_emit for event in events],
                 flavor_det=[event.flavor_det for event in events],
+                isAntiNu=[event.isAntiNu for event in events],
             )
         raise TypeError("Expected a list of NeutrinoEvent or a NeutrinoEventBatch.")
 
-    def _validate_event_arrays(self, L, E, flavor_emit, flavor_det):
+    def _format_event_antinu_arg(self, isAntiNu, n_events):
+        import numpy as np
+        xp = Backend.xp()
+
+        default = bool(self.hamiltonian._antineutrino)
+        if isAntiNu is None:
+            values = np.full(int(n_events), default, dtype=bool)
+            return xp.asarray(values)
+
+        values = np.asarray(isAntiNu, dtype=object)
+        if values.ndim == 0:
+            values = np.full(int(n_events), bool(values.item()), dtype=bool)
+        else:
+            values = values.reshape(-1)
+            if values.shape[0] == 1 and n_events != 1:
+                values = np.full(int(n_events), bool(values[0]), dtype=bool)
+            elif values.shape[0] != n_events:
+                values = values.astype(bool)
+                return xp.asarray(values)
+            else:
+                values = np.asarray([default if value is None else bool(value) for value in values], dtype=bool)
+
+        return xp.asarray(values)
+
+    def _validate_event_arrays(self, L, E, flavor_emit, flavor_det, isAntiNu):
         n_events = L.shape[0]
-        if E.shape[0] != n_events or flavor_emit.shape[0] != n_events or flavor_det.shape[0] != n_events:
+        if E.shape[0] != n_events or flavor_emit.shape[0] != n_events or flavor_det.shape[0] != n_events or isAntiNu.shape[0] != n_events:
             raise ValueError(
                 "Event arrays must have matching lengths: "
                 f"L_km has {L.shape[0]}, E_GeV has {E.shape[0]}, "
-                f"flavor_emit has {flavor_emit.shape[0]}, flavor_det has {flavor_det.shape[0]}."
+                f"flavor_emit has {flavor_emit.shape[0]}, flavor_det has {flavor_det.shape[0]}, "
+                f"isAntiNu has {isAntiNu.shape[0]}."
             )
 
         if n_events == 0:
