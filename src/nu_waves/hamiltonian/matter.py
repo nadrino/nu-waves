@@ -3,9 +3,12 @@ from nu_waves.models.spectrum import Spectrum
 from nu_waves.state.wave_function import WaveFunction, Basis
 from nu_waves.globals.backend import Backend
 from nu_waves.models.mixing import Mixing
-from nu_waves.utils.units import VCOEFF_EV, KM_TO_EVINV
+from nu_waves.utils.units import VCOEFF_EV, KM_TO_EVINV, GEV_TO_EV
+from nu_waves.hamiltonian.executors import GroupedEventExecutor
 
 from dataclasses import dataclass
+import numpy as np
+import time
 
 
 @dataclass
@@ -52,6 +55,129 @@ class MatterProfile:
         return dLs
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedMatterEventGroup:
+    indices: any
+    L: any
+    inv2E: any
+    flavor_emit: int
+    flavor_det: int
+    isAntiNu: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledConstantMatterBatch:
+    n_events: int
+    groups: tuple[PreparedMatterEventGroup, ...]
+
+
+class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
+    def __init__(self, oscillator):
+        super().__init__(oscillator=oscillator)
+        self._preparedCache = {}
+
+    def probabilityCompiled(self, compiled_batch):
+        xp = Backend.xp()
+        prepared = self._prepareCompiledBatch(compiled_batch)
+        out = xp.empty((prepared.n_events,), dtype=Backend.real_dtype())
+
+        U = self.hamiltonian.mixing.build_mixing_matrix()
+        Ud = xp.conjugate(U.T)
+        m2 = xp.asarray(self.hamiltonian.spectrum.get_m2(), dtype=U.dtype)
+        H_vacuum_eV2 = U @ xp.diag(m2) @ Ud
+
+        flavor_projector = xp.zeros((self.hamiltonian.n_neutrinos, self.hamiltonian.n_neutrinos), dtype=Backend.complex_dtype())
+        flavor_projector[0, 0] = 1.0
+        matter_potential = VCOEFF_EV * self.hamiltonian.constantDensity[0] * self.hamiltonian.constantDensity[1]
+
+        for group in prepared.groups:
+            signA = -1.0 if group.isAntiNu else 1.0
+            H = H_vacuum_eV2[None, ...] * group.inv2E[:, None, None] + (signA * matter_potential) * flavor_projector[None, ...]
+            eigen_values, eigen_vectors = self.hamiltonian._eigh(H)
+            phases = xp.exp((-1j) * eigen_values * group.L[:, None])
+            S = (eigen_vectors * phases[:, None, :]) @ xp.matrix_transpose(xp.conjugate(eigen_vectors))
+            prob = xp.abs(S[:, group.flavor_emit, group.flavor_det]) ** 2
+            out[group.indices] = prob
+
+        return Backend.from_device(out)
+
+    def _prepareCompiledBatch(self, compiled_batch):
+        if isinstance(compiled_batch, CompiledConstantMatterBatch):
+            return compiled_batch
+
+        cache_key = (
+            id(compiled_batch),
+            getattr(Backend.xp(), "__name__", Backend.xp().__class__.__name__),
+            str(getattr(Backend.xp(), "device", None)),
+        )
+        prepared = self._preparedCache.get(cache_key)
+        if prepared is not None:
+            return prepared
+
+        xp = Backend.xp()
+        groups = []
+        for group in compiled_batch.groups:
+            E = xp.asarray(group.E_GeV, dtype=Backend.real_dtype()) * GEV_TO_EV
+            groups.append(PreparedMatterEventGroup(
+                indices=xp.asarray(group.indices),
+                L=xp.asarray(group.L_km, dtype=Backend.real_dtype()) * KM_TO_EVINV,
+                inv2E=0.5 / E,
+                flavor_emit=group.flavor_emit,
+                flavor_det=group.flavor_det,
+                isAntiNu=group.isAntiNu,
+            ))
+
+        prepared = CompiledConstantMatterBatch(
+            n_events=compiled_batch.n_events,
+            groups=tuple(groups),
+        )
+        self._preparedCache[cache_key] = prepared
+        return prepared
+
+
+class ConstantMatterExecutor(GroupedEventExecutor):
+    def probabilityCompiled(self, compiled_batch):
+        xp = Backend.xp()
+        out = xp.empty((compiled_batch.n_events,), dtype=Backend.real_dtype())
+        original_antineutrino = self.hamiltonian._antineutrino
+
+        try:
+            for group in compiled_batch.groups:
+                self.hamiltonian.set_antineutrino(group.isAntiNu)
+                L = xp.asarray(group.L_km, dtype=Backend.real_dtype()) * KM_TO_EVINV
+                E = xp.asarray(group.E_GeV, dtype=Backend.real_dtype()) * GEV_TO_EV
+                S = self.hamiltonian.get_barger_propagator(L=L, E=E)
+                prob = xp.abs(S[:, group.flavor_emit, group.flavor_det]) ** 2
+
+                indices = xp.asarray(group.indices)
+                out[indices] = prob
+        finally:
+            self.hamiltonian.set_antineutrino(original_antineutrino)
+
+        return Backend.from_device(out)
+
+
+class LayeredMatterExecutor(GroupedEventExecutor):
+    def probabilityCompiled(self, compiled_batch):
+        out = np.empty(compiled_batch.n_events, dtype=float)
+        original_antineutrino = self.hamiltonian._antineutrino
+
+        try:
+            for group in compiled_batch.groups:
+                self.hamiltonian.set_antineutrino(group.isAntiNu)
+                probs = self.oscillator._probability_legacy(
+                    L_km=group.L_km,
+                    E_GeV=group.E_GeV,
+                    flavor_emit=group.flavor_emit,
+                    flavor_det=group.flavor_det,
+                )
+                out[group.indices] = np.asarray(probs, dtype=float).reshape(-1)
+        finally:
+            self.hamiltonian.set_antineutrino(original_antineutrino)
+
+        return out
+
+
 class Hamiltonian(HamiltonianBase):
     """
         Matter Hamiltonian with Barger layer product.
@@ -60,9 +186,46 @@ class Hamiltonian(HamiltonianBase):
     """
     def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
         super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino)
+        self.enableConstantMatterBatchOptimization = False
+        self.enableEighProfiling = False
+        self.resetProfiling()
         self._constant_profile = None
         self._matter_profile = None
         self.set_constant_density(rho_in_g_per_cm3=0)
+
+    def makeExecutor(self, oscillator):
+        if self._matter_profile is None and self.enableConstantMatterBatchOptimization:
+            return ConstantMatterOptimizedExecutor(oscillator=oscillator)
+        if self._matter_profile is None:
+            return ConstantMatterExecutor(oscillator=oscillator)
+        return LayeredMatterExecutor(oscillator=oscillator)
+
+    @property
+    def constantDensity(self):
+        return self._constant_profile
+
+    def resetProfiling(self):
+        self._profiling = {
+            "eighCalls": 0,
+            "eighEvents": 0,
+            "eighTimeSeconds": 0.0,
+        }
+
+    def getProfiling(self):
+        return dict(self._profiling)
+
+    def _eigh(self, H):
+        xp = Backend.xp()
+        if not self.enableEighProfiling:
+            return xp.linalg.eigh(H)
+
+        t0 = time.perf_counter()
+        eigen_values, eigen_vectors = xp.linalg.eigh(H)
+        elapsed = time.perf_counter() - t0
+        self._profiling["eighCalls"] += 1
+        self._profiling["eighEvents"] += int(H.shape[0])
+        self._profiling["eighTimeSeconds"] += elapsed
+        return eigen_values, eigen_vectors
 
     def set_constant_density(self, rho_in_g_per_cm3: float, Ye: float = 0.5):
         self._constant_profile = (rho_in_g_per_cm3, Ye)
@@ -95,7 +258,7 @@ class Hamiltonian(HamiltonianBase):
         def calc_S(L_, rho_, Ye_):
             matter_potential = signA * (VCOEFF_EV * rho_ * Ye_)
             H = H_vacuum_eV2[None, ...] * inv2E + matter_potential * flavor_projector[None, ...]
-            eigen_values, eigen_vectors = xp.linalg.eigh(H)
+            eigen_values, eigen_vectors = self._eigh(H)
             phases = xp.exp((-1j) * eigen_values * L_[..., None])
             S = (eigen_vectors * phases[:, None, :]) @ xp.matrix_transpose(xp.conjugate(eigen_vectors))
             return S

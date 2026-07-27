@@ -38,6 +38,10 @@ class HamiltonianBase(ABC):
         """Return S(L) in FLAVOR basis, shape (nE, nF, nF)."""
         ...
 
+    @abstractmethod
+    def makeExecutor(self, oscillator):
+        ...
+
     # Generic propagation (can be overridden for faster calculations)
     # psi returned should be expressed in the flavor basis
     def propagate_state(self, psi: WaveFunction, L, E):
