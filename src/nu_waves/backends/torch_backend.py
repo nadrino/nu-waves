@@ -87,6 +87,11 @@ class TorchBackend:
                          device=self._device,
                          dtype=dtype or self._default_dtype)
 
+    def empty(self, shape, dtype=None, device=None):
+        if device is None:
+            device = self.device
+        return self.xp.empty(shape, device=device, dtype=dtype)
+
     def zeros(self, shape, dtype=None, device=None):
         if device is None:
             device = self.device
@@ -139,4 +144,3 @@ class TorchBackend:
             return Backend.xp().randn(shape, device=device)
 
     random = _Random()
-
