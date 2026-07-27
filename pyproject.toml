@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nu-waves"
-version = "1.2.4"  # keep in sync with src/nu_waves/version.py unless you switch to dynamic
+version = "1.2.5"  # keep in sync with src/nu_waves/version.py unless you switch to dynamic
 description = "Flavour-oscillation probabilities for neutrinos with numpy/torch backends."
 readme = "README.md"
 requires-python = ">=3.10"
