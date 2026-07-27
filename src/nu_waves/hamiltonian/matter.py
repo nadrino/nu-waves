@@ -4,9 +4,10 @@ from nu_waves.state.wave_function import WaveFunction, Basis
 from nu_waves.globals.backend import Backend
 from nu_waves.models.mixing import Mixing
 from nu_waves.utils.units import VCOEFF_EV, KM_TO_EVINV
-from nu_waves.hamiltonian.executors import ConstantMatterExecutor, LayeredMatterExecutor
+from nu_waves.hamiltonian.executors import GroupedEventExecutor
 
 from dataclasses import dataclass
+import numpy as np
 
 
 @dataclass
@@ -51,6 +52,48 @@ class MatterProfile:
             raise NotImplementedError("slicing must be 'fraction' or 'absolute'")
 
         return dLs
+
+
+class ConstantMatterExecutor(GroupedEventExecutor):
+    def probabilityCompiled(self, compiled_batch):
+        out = np.empty(compiled_batch.n_events, dtype=float)
+        original_antineutrino = self.hamiltonian._antineutrino
+
+        try:
+            for group in compiled_batch.groups:
+                self.hamiltonian.set_antineutrino(group.isAntiNu)
+                probs = self.oscillator._probability_legacy(
+                    L_km=group.L_km,
+                    E_GeV=group.E_GeV,
+                    flavor_emit=group.flavor_emit,
+                    flavor_det=group.flavor_det,
+                )
+                out[group.indices] = np.asarray(probs, dtype=float).reshape(-1)
+        finally:
+            self.hamiltonian.set_antineutrino(original_antineutrino)
+
+        return out
+
+
+class LayeredMatterExecutor(GroupedEventExecutor):
+    def probabilityCompiled(self, compiled_batch):
+        out = np.empty(compiled_batch.n_events, dtype=float)
+        original_antineutrino = self.hamiltonian._antineutrino
+
+        try:
+            for group in compiled_batch.groups:
+                self.hamiltonian.set_antineutrino(group.isAntiNu)
+                probs = self.oscillator._probability_legacy(
+                    L_km=group.L_km,
+                    E_GeV=group.E_GeV,
+                    flavor_emit=group.flavor_emit,
+                    flavor_det=group.flavor_det,
+                )
+                out[group.indices] = np.asarray(probs, dtype=float).reshape(-1)
+        finally:
+            self.hamiltonian.set_antineutrino(original_antineutrino)
+
+        return out
 
 
 class Hamiltonian(HamiltonianBase):
