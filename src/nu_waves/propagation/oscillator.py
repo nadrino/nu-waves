@@ -59,6 +59,8 @@ class Oscillator:
     def __init__(self, hamiltonian: HamiltonianBase, useExecutor: bool = True):
         self.hamiltonian = hamiltonian
         self.useExecutor = useExecutor
+        self._executor = None
+        self._executorSignature = None
 
     def probability(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None):
         if isinstance(L_km, CompiledEventBatch):
@@ -156,8 +158,26 @@ class Oscillator:
         if not self.useExecutor:
             return self._probabilityCompiledLegacy(compiled_batch)
 
-        executor = self.hamiltonian.makeExecutor(oscillator=self)
+        executor = self._getExecutor()
         return executor.probabilityCompiled(compiled_batch)
+
+    def _getExecutor(self):
+        backend = Backend.xp()
+        backend_name = getattr(backend, "__name__", backend.__class__.__name__)
+        backend_device = getattr(backend, "device", None)
+        signature = (
+            id(self.hamiltonian),
+            backend_name,
+            str(backend_device),
+            bool(getattr(self.hamiltonian, "_matter_profile", None) is not None),
+            bool(getattr(self.hamiltonian, "enableConstantMatterBatchOptimization", False)),
+        )
+
+        if self._executor is None or self._executorSignature != signature:
+            self._executor = self.hamiltonian.makeExecutor(oscillator=self)
+            self._executorSignature = signature
+
+        return self._executor
 
     def _probabilityCompiledLegacy(self, compiled_batch: CompiledEventBatch):
         out = np.empty(compiled_batch.n_events, dtype=float)
