@@ -7,10 +7,10 @@ from nu_waves.hamiltonian.executors import VacuumExecutor
 
 
 class Hamiltonian(HamiltonianBase):
-    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
-        super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino)
+    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool, enableExecutor: bool = True):
+        super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino, enableExecutor=enableExecutor)
 
-    def make_executor(self, oscillator):
+    def makeExecutor(self, oscillator):
         return VacuumExecutor(oscillator=oscillator)
 
     def propagate_state(self, psi: WaveFunction, L, E):

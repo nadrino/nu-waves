@@ -65,7 +65,7 @@ class Oscillator:
                 raise TypeError(
                     "Compiled event probability calls must only pass the CompiledEventBatch."
                 )
-            return self._probability_compiled(L_km)
+            return self._probabilityCompiled(L_km)
 
         if self._is_event_arg(L_km):
             if E_GeV is not None or flavor_emit is not None or flavor_det is not None:
@@ -102,13 +102,80 @@ class Oscillator:
         return Backend.from_device(self._squeeze_array(out))
 
     def _probability_events(self, events):
-        return self._probability_compiled(self.compile_events(events))
+        if not self.hamiltonian.enableExecutor:
+            return self._probabilityEventsLegacy(events)
+        return self._probabilityCompiled(self.compileEvents(events))
 
-    def _probability_compiled(self, compiled_batch: CompiledEventBatch):
-        executor = self.hamiltonian.make_executor(oscillator=self)
-        return executor.probability_compiled(compiled_batch)
+    def _probabilityEventsLegacy(self, events):
+        batch = self._coerce_event_batch(events)
+        xp = Backend.xp()
 
-    def compile_events(self, events) -> CompiledEventBatch:
+        L = xp.asarray(batch.L_km, dtype=Backend.real_dtype()).reshape(-1)
+        E = xp.asarray(batch.E_GeV, dtype=Backend.real_dtype()).reshape(-1)
+        flavor_emit = xp.asarray(batch.flavor_emit).reshape(-1)
+        flavor_det = xp.asarray(batch.flavor_det).reshape(-1)
+        isAntiNu = xp.asarray(self._format_event_antinu_arg(batch.isAntiNu, n_events=L.shape[0]))
+
+        self._validate_event_arrays(
+            L=Backend.from_device(L),
+            E=Backend.from_device(E),
+            flavor_emit=Backend.from_device(flavor_emit),
+            flavor_det=Backend.from_device(flavor_det),
+            isAntiNu=Backend.from_device(isAntiNu),
+        )
+
+        L = L * KM_TO_EVINV
+        E = E * GEV_TO_EV
+
+        all_flavors = list(range(int(self.hamiltonian.n_neutrinos)))
+        out = xp.zeros((L.shape[0],), dtype=Backend.real_dtype())
+
+        original_antineutrino = self.hamiltonian._antineutrino
+        try:
+            for antineutrino in (False, True):
+                mask = isAntiNu == antineutrino
+                if not bool(Backend.from_device(xp.any(mask))):
+                    continue
+
+                self.hamiltonian.set_antineutrino(antineutrino)
+                probs = self._probability(
+                    L=L[mask],
+                    E=E[mask],
+                    flavor_emit=all_flavors,
+                    flavor_det=all_flavors,
+                )
+                event_idx = xp.asarray(range(probs.shape[0]))
+                out[mask] = probs[event_idx, flavor_emit[mask], flavor_det[mask]]
+        finally:
+            self.hamiltonian.set_antineutrino(original_antineutrino)
+
+        return Backend.from_device(out)
+
+    def _probabilityCompiled(self, compiled_batch: CompiledEventBatch):
+        if not self.hamiltonian.enableExecutor:
+            return self._probabilityCompiledLegacy(compiled_batch)
+
+        executor = self.hamiltonian.makeExecutor(oscillator=self)
+        return executor.probabilityCompiled(compiled_batch)
+
+    def _probabilityCompiledLegacy(self, compiled_batch: CompiledEventBatch):
+        out = np.empty(compiled_batch.n_events, dtype=float)
+        original_antineutrino = self.hamiltonian._antineutrino
+        try:
+            for group in compiled_batch.groups:
+                self.hamiltonian.set_antineutrino(group.isAntiNu)
+                probs = self._probability_legacy(
+                    L_km=group.L_km,
+                    E_GeV=group.E_GeV,
+                    flavor_emit=group.flavor_emit,
+                    flavor_det=group.flavor_det,
+                )
+                out[group.indices] = np.asarray(probs, dtype=float).reshape(-1)
+        finally:
+            self.hamiltonian.set_antineutrino(original_antineutrino)
+        return out
+
+    def compileEvents(self, events) -> CompiledEventBatch:
         if isinstance(events, CompiledEventBatch):
             return events
 
@@ -143,6 +210,9 @@ class Oscillator:
 
         groups.sort(key=lambda group: (group.isAntiNu, group.flavor_emit, group.flavor_det))
         return CompiledEventBatch(n_events=L.shape[0], groups=tuple(groups))
+
+    def compile_events(self, events) -> CompiledEventBatch:
+        return self.compileEvents(events)
 
     def probability_sampled(self, L_km, E_GeV, n_samples, flavor_emit=None, flavor_det=None, E_sample_fct=None, L_sample_fct=None):
         if E_sample_fct is None and L_sample_fct is None:

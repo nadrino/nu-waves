@@ -59,13 +59,13 @@ class Hamiltonian(HamiltonianBase):
 
 
     """
-    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
-        super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino)
+    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool, enableExecutor: bool = True):
+        super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino, enableExecutor=enableExecutor)
         self._constant_profile = None
         self._matter_profile = None
         self.set_constant_density(rho_in_g_per_cm3=0)
 
-    def make_executor(self, oscillator):
+    def makeExecutor(self, oscillator):
         if self._matter_profile is None:
             return ConstantMatterExecutor(oscillator=oscillator)
         return LayeredMatterExecutor(oscillator=oscillator)

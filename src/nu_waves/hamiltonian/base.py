@@ -7,10 +7,11 @@ from abc import ABC, abstractmethod
 
 
 class HamiltonianBase(ABC):
-    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
+    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool, enableExecutor: bool = True):
         self._antineutrino = antineutrino
         self._mixing = mixing
         self._spectrum = spectrum
+        self.enableExecutor = enableExecutor
         self._check_parameters()
 
     @property
@@ -39,7 +40,7 @@ class HamiltonianBase(ABC):
         ...
 
     @abstractmethod
-    def make_executor(self, oscillator):
+    def makeExecutor(self, oscillator):
         ...
 
     # Generic propagation (can be overridden for faster calculations)

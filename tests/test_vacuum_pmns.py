@@ -220,6 +220,29 @@ def test_compiled_event_batch_preserves_input_order():
     print("test_compiled_event_batch_preserves_input_order: success.")
 
 
+def test_vacuum_executor_matches_disabled_legacy_path():
+    print("test_vacuum_executor_matches_disabled_legacy_path test...")
+    batch = NeutrinoEventBatch(
+        L_km=np.array([295, 295, 295, 295, 295, 295]),
+        E_GeV=np.array([0.4, 0.6, 0.9, 1.3, 1.7, 2.2]),
+        flavor_emit=np.array([muon, muon, electron, tau, muon, electron]),
+        flavor_det=np.array([electron, muon, tau, electron, tau, muon]),
+        isAntiNu=np.array([False, False, False, False, True, True]),
+    )
+
+    h.enableExecutor = True
+    P_executor = osc.probability(batch)
+
+    h.enableExecutor = False
+    try:
+        P_legacy = osc.probability(batch)
+    finally:
+        h.enableExecutor = True
+
+    np.testing.assert_allclose(P_executor, P_legacy, atol=1e-14)
+    print("test_vacuum_executor_matches_disabled_legacy_path: success.")
+
+
 def test_event_probability_rejects_extra_arguments():
     print("test_event_probability_rejects_extra_arguments test...")
     events = [NeutrinoEvent(L_km=295, E_GeV=0.6, flavor_emit=muon, flavor_det=electron)]
@@ -240,4 +263,5 @@ test_event_probability_batch_matches_legacy_channels()
 test_event_probability_mixed_antinu_batch_matches_legacy_channels()
 test_event_probability_list_antinu_defaults_to_global_flag()
 test_compiled_event_batch_preserves_input_order()
+test_vacuum_executor_matches_disabled_legacy_path()
 test_event_probability_rejects_extra_arguments()
