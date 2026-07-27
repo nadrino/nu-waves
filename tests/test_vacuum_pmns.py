@@ -2,7 +2,7 @@ import numpy as np
 from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.hamiltonian import vacuum
-from nu_waves.propagation.oscillator import Oscillator
+from nu_waves.propagation.oscillator import NeutrinoEvent, NeutrinoEventBatch, Oscillator
 from nu_waves.utils.flavors import electron, muon, tau
 from nu_waves.globals.backend import Backend
 
@@ -90,6 +90,69 @@ def test_probability_conservation():
     print("test_probability_conservation: success.")
 
 
+def test_event_probability_list_matches_legacy_channels():
+    print("test_event_probability_list_matches_legacy_channels test...")
+    events = [
+        NeutrinoEvent(L_km=295, E_GeV=0.6, flavor_emit=muon, flavor_det=electron),
+        NeutrinoEvent(L_km=295, E_GeV=1.0, flavor_emit=muon, flavor_det=muon),
+        NeutrinoEvent(L_km=295, E_GeV=2.0, flavor_emit=electron, flavor_det=tau),
+    ]
+
+    P_events = osc.probability(events)
+    P_all = osc.probability(
+        L_km=[event.L_km for event in events],
+        E_GeV=[event.E_GeV for event in events],
+        flavor_emit=None,
+        flavor_det=None,
+    )
+    P_expected = np.array([
+        P_all[i, event.flavor_emit, event.flavor_det]
+        for i, event in enumerate(events)
+    ])
+
+    assert P_events.shape == (len(events),)
+    np.testing.assert_allclose(P_events, P_expected, atol=1e-14)
+    print("test_event_probability_list_matches_legacy_channels: success.")
+
+
+def test_event_probability_batch_matches_legacy_channels():
+    print("test_event_probability_batch_matches_legacy_channels test...")
+    batch = NeutrinoEventBatch(
+        L_km=np.array([295, 295, 295]),
+        E_GeV=np.array([0.6, 1.0, 2.0]),
+        flavor_emit=np.array([muon, muon, electron]),
+        flavor_det=np.array([electron, muon, tau]),
+    )
+
+    P_events = osc.probability(batch)
+    P_all = osc.probability(
+        L_km=batch.L_km,
+        E_GeV=batch.E_GeV,
+        flavor_emit=None,
+        flavor_det=None,
+    )
+    P_expected = P_all[np.arange(batch.L_km.shape[0]), batch.flavor_emit, batch.flavor_det]
+
+    assert P_events.shape == (batch.L_km.shape[0],)
+    np.testing.assert_allclose(P_events, P_expected, atol=1e-14)
+    print("test_event_probability_batch_matches_legacy_channels: success.")
+
+
+def test_event_probability_rejects_extra_arguments():
+    print("test_event_probability_rejects_extra_arguments test...")
+    events = [NeutrinoEvent(L_km=295, E_GeV=0.6, flavor_emit=muon, flavor_det=electron)]
+
+    try:
+        osc.probability(events, flavor_emit=muon)
+        assert False
+    except TypeError:
+        pass
+    print("test_event_probability_rejects_extra_arguments: success.")
+
+
 test_syntax()
 test_zero_baseline_identity()
 test_probability_conservation()
+test_event_probability_list_matches_legacy_channels()
+test_event_probability_batch_matches_legacy_channels()
+test_event_probability_rejects_extra_arguments()
