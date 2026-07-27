@@ -8,6 +8,7 @@ from nu_waves.hamiltonian.executors import GroupedEventExecutor
 
 from dataclasses import dataclass
 import numpy as np
+import time
 
 
 @dataclass
@@ -92,7 +93,7 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
         for group in prepared.groups:
             signA = -1.0 if group.isAntiNu else 1.0
             H = H_vacuum_eV2[None, ...] * group.inv2E[:, None, None] + (signA * matter_potential) * flavor_projector[None, ...]
-            eigen_values, eigen_vectors = xp.linalg.eigh(H)
+            eigen_values, eigen_vectors = self.hamiltonian._eigh(H)
             phases = xp.exp((-1j) * eigen_values * group.L[:, None])
             S = (eigen_vectors * phases[:, None, :]) @ xp.matrix_transpose(xp.conjugate(eigen_vectors))
             prob = xp.abs(S[:, group.flavor_emit, group.flavor_det]) ** 2
@@ -186,6 +187,8 @@ class Hamiltonian(HamiltonianBase):
     def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
         super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino)
         self.enableConstantMatterBatchOptimization = False
+        self.enableEighProfiling = False
+        self.resetProfiling()
         self._constant_profile = None
         self._matter_profile = None
         self.set_constant_density(rho_in_g_per_cm3=0)
@@ -200,6 +203,29 @@ class Hamiltonian(HamiltonianBase):
     @property
     def constantDensity(self):
         return self._constant_profile
+
+    def resetProfiling(self):
+        self._profiling = {
+            "eighCalls": 0,
+            "eighEvents": 0,
+            "eighTimeSeconds": 0.0,
+        }
+
+    def getProfiling(self):
+        return dict(self._profiling)
+
+    def _eigh(self, H):
+        xp = Backend.xp()
+        if not self.enableEighProfiling:
+            return xp.linalg.eigh(H)
+
+        t0 = time.perf_counter()
+        eigen_values, eigen_vectors = xp.linalg.eigh(H)
+        elapsed = time.perf_counter() - t0
+        self._profiling["eighCalls"] += 1
+        self._profiling["eighEvents"] += int(H.shape[0])
+        self._profiling["eighTimeSeconds"] += elapsed
+        return eigen_values, eigen_vectors
 
     def set_constant_density(self, rho_in_g_per_cm3: float, Ye: float = 0.5):
         self._constant_profile = (rho_in_g_per_cm3, Ye)
@@ -232,7 +258,7 @@ class Hamiltonian(HamiltonianBase):
         def calc_S(L_, rho_, Ye_):
             matter_potential = signA * (VCOEFF_EV * rho_ * Ye_)
             H = H_vacuum_eV2[None, ...] * inv2E + matter_potential * flavor_projector[None, ...]
-            eigen_values, eigen_vectors = xp.linalg.eigh(H)
+            eigen_values, eigen_vectors = self._eigh(H)
             phases = xp.exp((-1j) * eigen_values * L_[..., None])
             S = (eigen_vectors * phases[:, None, :]) @ xp.matrix_transpose(xp.conjugate(eigen_vectors))
             return S
