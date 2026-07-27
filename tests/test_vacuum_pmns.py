@@ -230,14 +230,14 @@ def test_vacuum_executor_matches_disabled_legacy_path():
         isAntiNu=np.array([False, False, False, False, True, True]),
     )
 
-    h.enableExecutor = True
+    osc.useExecutor = True
     P_executor = osc.probability(batch)
 
-    h.enableExecutor = False
+    osc.useExecutor = False
     try:
         P_legacy = osc.probability(batch)
     finally:
-        h.enableExecutor = True
+        osc.useExecutor = True
 
     np.testing.assert_allclose(P_executor, P_legacy, atol=1e-14)
     print("test_vacuum_executor_matches_disabled_legacy_path: success.")

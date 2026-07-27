@@ -56,8 +56,9 @@ def _sample_array(X, n_samples, sampling_fct):
 
 class Oscillator:
 
-    def __init__(self, hamiltonian: HamiltonianBase):
+    def __init__(self, hamiltonian: HamiltonianBase, useExecutor: bool = True):
         self.hamiltonian = hamiltonian
+        self.useExecutor = useExecutor
 
     def probability(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None):
         if isinstance(L_km, CompiledEventBatch):
@@ -102,7 +103,7 @@ class Oscillator:
         return Backend.from_device(self._squeeze_array(out))
 
     def _probability_events(self, events):
-        if not self.hamiltonian.enableExecutor:
+        if not self.useExecutor:
             return self._probabilityEventsLegacy(events)
         return self._probabilityCompiled(self.compileEvents(events))
 
@@ -152,7 +153,7 @@ class Oscillator:
         return Backend.from_device(out)
 
     def _probabilityCompiled(self, compiled_batch: CompiledEventBatch):
-        if not self.hamiltonian.enableExecutor:
+        if not self.useExecutor:
             return self._probabilityCompiledLegacy(compiled_batch)
 
         executor = self.hamiltonian.makeExecutor(oscillator=self)

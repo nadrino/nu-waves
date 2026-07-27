@@ -59,8 +59,8 @@ class Hamiltonian(HamiltonianBase):
 
 
     """
-    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool, enableExecutor: bool = True):
-        super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino, enableExecutor=enableExecutor)
+    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
+        super().__init__(mixing=mixing, spectrum=spectrum, antineutrino=antineutrino)
         self._constant_profile = None
         self._matter_profile = None
         self.set_constant_density(rho_in_g_per_cm3=0)

@@ -7,11 +7,10 @@ from abc import ABC, abstractmethod
 
 
 class HamiltonianBase(ABC):
-    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool, enableExecutor: bool = True):
+    def __init__(self, mixing: Mixing, spectrum: Spectrum, antineutrino: bool):
         self._antineutrino = antineutrino
         self._mixing = mixing
         self._spectrum = spectrum
-        self.enableExecutor = enableExecutor
         self._check_parameters()
 
     @property
