@@ -3,7 +3,7 @@ from nu_waves.models.spectrum import Spectrum
 from nu_waves.state.wave_function import WaveFunction, Basis
 from nu_waves.globals.backend import Backend
 from nu_waves.models.mixing import Mixing
-from nu_waves.utils.units import VCOEFF_EV, KM_TO_EVINV
+from nu_waves.utils.units import VCOEFF_EV, KM_TO_EVINV, GEV_TO_EV
 from nu_waves.hamiltonian.executors import GroupedEventExecutor
 
 from dataclasses import dataclass
@@ -56,23 +56,24 @@ class MatterProfile:
 
 class ConstantMatterExecutor(GroupedEventExecutor):
     def probabilityCompiled(self, compiled_batch):
-        out = np.empty(compiled_batch.n_events, dtype=float)
+        xp = Backend.xp()
+        out = xp.empty((compiled_batch.n_events,), dtype=Backend.real_dtype())
         original_antineutrino = self.hamiltonian._antineutrino
 
         try:
             for group in compiled_batch.groups:
                 self.hamiltonian.set_antineutrino(group.isAntiNu)
-                probs = self.oscillator._probability_legacy(
-                    L_km=group.L_km,
-                    E_GeV=group.E_GeV,
-                    flavor_emit=group.flavor_emit,
-                    flavor_det=group.flavor_det,
-                )
-                out[group.indices] = np.asarray(probs, dtype=float).reshape(-1)
+                L = xp.asarray(group.L_km, dtype=Backend.real_dtype()) * KM_TO_EVINV
+                E = xp.asarray(group.E_GeV, dtype=Backend.real_dtype()) * GEV_TO_EV
+                S = self.hamiltonian.get_barger_propagator(L=L, E=E)
+                prob = xp.abs(S[:, group.flavor_emit, group.flavor_det]) ** 2
+
+                indices = xp.asarray(group.indices)
+                out[indices] = prob
         finally:
             self.hamiltonian.set_antineutrino(original_antineutrino)
 
-        return out
+        return Backend.from_device(out)
 
 
 class LayeredMatterExecutor(GroupedEventExecutor):
