@@ -20,3 +20,8 @@ and also file names,
 while all the rest is using `camelCase` (functions, methods, members...).
 
 To be filled up...
+
+
+### Comments and documentation
+
+All the comments should be writen in english.
