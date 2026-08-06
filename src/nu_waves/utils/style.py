@@ -8,5 +8,7 @@ plt.rcParams.update({
     "ytick.labelsize": 13,
     "legend.fontsize": 13,
     "mathtext.fontset": "cm",
-    "font.family": "serif"
+    "font.family": "serif",
+    "figure.dpi": 150,
+    "savefig.dpi": 200,
 })
