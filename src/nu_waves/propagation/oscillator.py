@@ -270,6 +270,55 @@ class Oscillator:
             self._generate_initial_state(flavor_emit=flavor_emit, E=E)
         )
 
+    def propagate_state(self, L_km, E_GeV, flavor_emit=None) -> WaveFunction:
+        """Propagate flavor state vectors and return them in the flavor basis.
+
+        This additive API intentionally follows the legacy pairwise ``L`` / ``E``
+        semantics.  Unlike :meth:`probability`, it preserves complex amplitudes
+        so phase-sensitive observables (density matrices and flavor-mode
+        correlations) can be computed.  It does not use the probability
+        executors; their optimized paths and public behaviour are unchanged.
+
+        The returned values have shape ``(n_points, n_initial_flavors,
+        n_flavors)`` and remain on the configured backend.
+        """
+        L, E = self._generate_L_and_E_arrays(L_km, E_GeV)
+        flavor_emit = self._format_flavor_arg(flavor_emit)
+        psi = self._generate_initial_state(
+            flavor_emit=flavor_emit,
+            E=E * GEV_TO_EV,
+        )
+        self.hamiltonian.propagate_state(
+            psi=psi,
+            L=L * KM_TO_EVINV,
+            E=E * GEV_TO_EV,
+        )
+        return psi
+
+    def density_matrix(self, L_km, E_GeV, flavor_emit=None, coherence_model=None):
+        """Return flavor density matrices for propagated initial flavor states.
+
+        Parameters are identical to :meth:`propagate_state`.  When supplied, a
+        ``coherence_model`` must provide ``apply(rho, L_eV_inv, E_eV,
+        hamiltonian)``; see :class:`GaussianWavePacket` for the standard
+        vacuum wave-packet decoherence model.
+
+        The result is copied back to NumPy, consistently with
+        :meth:`probability`, and has shape ``(n_points, n_initial_flavors,
+        n_flavors, n_flavors)``.
+        """
+        L, E = self._generate_L_and_E_arrays(L_km, E_GeV)
+        psi = self.propagate_state(L_km=L, E_GeV=E, flavor_emit=flavor_emit)
+        rho = psi.density_matrix()
+        if coherence_model is not None:
+            rho = coherence_model.apply(
+                rho=rho,
+                L_eV_inv=L * KM_TO_EVINV,
+                E_eV=E * GEV_TO_EV,
+                hamiltonian=self.hamiltonian,
+            )
+        return Backend.from_device(rho)
+
     def _probability(self, L, E, flavor_emit, flavor_det):
         psi = self._generate_initial_state(flavor_emit=flavor_emit, E=E)
         self.hamiltonian.propagate_state(psi=psi, L=L, E=E) # return the state in flavor basis

@@ -36,6 +36,18 @@ class WaveFunction:
             eigen_vectors=None if self.eigen_vectors is None else xp.copy(self.eigen_vectors),
         )
 
+    def density_matrix(self):
+        """Return the density matrix for every propagated state.
+
+        ``values`` stores state vectors with the flavor index on its last
+        axis.  The returned array consequently has shape
+        ``(..., n_flavors, n_flavors)``.  This is deliberately a small,
+        basis-agnostic primitive: higher-level correlation observables live
+        in :mod:`nu_waves.correlations`.
+        """
+        xp = Backend.xp()
+        return self.values[..., :, None] * xp.conjugate(self.values[..., None, :])
+
     def to_basis(self, target_basis: Basis, eigen_vectors):
         """
         Rotate the wavefunction to a new basis defined by `eigen_vectors`.
