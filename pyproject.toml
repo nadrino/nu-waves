@@ -50,3 +50,6 @@ include = ["src/nu_waves", "README.md", "LICENSE"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nu_waves"]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "*_test.py", "Test*.py"]
