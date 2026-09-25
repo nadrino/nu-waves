@@ -49,10 +49,10 @@ class GaussianWavePacket:
         U = hamiltonian.mixing.build_mixing_matrix()
         if hamiltonian._antineutrino:
             U = xp.conjugate(U)
-        Uc = xp.conjugate(U)
+        Ud = xp.conjugate(xp.matrix_transpose(U))
 
-        # Row-vector convention used by WaveFunction: b = a @ U.
-        rho_mass = xp.matmul(xp.matrix_transpose(U), xp.matmul(rho, Uc))
+        # Density operators transform as U-dagger @ rho @ U.
+        rho_mass = xp.matmul(Ud, xp.matmul(rho, U))
         m2 = xp.asarray(hamiltonian.spectrum.get_m2(), dtype=Backend.real_dtype())
         dm2 = xp.abs(m2[:, None] - m2[None, :])
         sigma_x = self.sigma_x_m * METER_TO_EVINV
@@ -65,5 +65,4 @@ class GaussianWavePacket:
         )
         rho_mass = rho_mass * damping[:, None, :, :]
 
-        Ud = xp.conjugate(xp.matrix_transpose(U))
-        return xp.matmul(xp.matrix_transpose(Ud), xp.matmul(rho_mass, xp.conjugate(Ud)))
+        return xp.matmul(U, xp.matmul(rho_mass, Ud))

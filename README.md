@@ -25,6 +25,22 @@ pip install nu-waves
 - Earth model (PREM) with `cosz`
 - Adiabatic transitions
 
+## Oscillation convention
+
+The active three-flavor PMNS matrix uses the PDG convention,
+`U_e3 = sin(theta13) * exp(-1j * deltaCP)`. The evolution operator stores
+`S[energy, detected, emitted]`, while public probabilities retain the order
+`P[energy, emitted, detected] = abs(S[energy, detected, emitted])**2`
+(singleton axes may be squeezed). Antineutrinos conjugate the mixing matrix
+and reverse the matter potential. Matter layers are ordered from source to detector.
+
+The CP convention correction changes predictions from earlier implementations
+that transposed transition amplitudes. Remove any external phase-sign or channel-swap
+workarounds when adopting this correction, and regenerate affected predictions.
+The notebook `notebooks/04_vacuum_executor_benchmarks.ipynb` checks an independent
+PDG amplitude before benchmarking; `tests/TestPdgConvention.py` also covers matter,
+antineutrinos, layer ordering and decoherence.
+
 ## Some nice pictures
 
 ![vacuum_pmns.jpg](figures/vacuum_pmns.jpg)
@@ -89,5 +105,4 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 ```
-
 

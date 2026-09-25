@@ -35,7 +35,10 @@ class HamiltonianBase(ABC):
     # Default: produce S(L) in FLAVOR basis
     @abstractmethod
     def get_barger_propagator(self, L, E) -> any:
-        """Return S(L) in FLAVOR basis, shape (nE, nF, nF)."""
+        """Return S[energy, detected, emitted] in FLAVOR basis.
+
+        L is in eV^-1 and E in eV. S acts on column ket coefficients.
+        """
         ...
 
     @abstractmethod
@@ -51,7 +54,8 @@ class HamiltonianBase(ABC):
                              "Override propagate_state in your subclass, or rotate ψ beforehand.")
 
         S = self.get_barger_propagator(L=L, E=E)
-        psi.values = Backend.xp().matmul(psi.values, S)
+        # Ket coefficients are stored as rows, so transpose the operator.
+        psi.values = Backend.xp().matmul(psi.values, Backend.xp().matrix_transpose(S))
 
     def _check_parameters(self):
         assert (self._spectrum.n_neutrinos == self._mixing.n_neutrinos)

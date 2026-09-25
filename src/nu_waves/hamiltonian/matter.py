@@ -92,11 +92,12 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
 
         for group in prepared.groups:
             signA = -1.0 if group.isAntiNu else 1.0
-            H = H_vacuum_eV2[None, ...] * group.inv2E[:, None, None] + (signA * matter_potential) * flavor_projector[None, ...]
+            Hvacuum = xp.conjugate(H_vacuum_eV2) if group.isAntiNu else H_vacuum_eV2
+            H = Hvacuum[None, ...] * group.inv2E[:, None, None] + (signA * matter_potential) * flavor_projector[None, ...]
             eigen_values, eigen_vectors = self.hamiltonian._eigh(H)
             phases = xp.exp((-1j) * eigen_values * group.L[:, None])
             S = (eigen_vectors * phases[:, None, :]) @ xp.matrix_transpose(xp.conjugate(eigen_vectors))
-            prob = xp.abs(S[:, group.flavor_emit, group.flavor_det]) ** 2
+            prob = xp.abs(S[:, group.flavor_det, group.flavor_emit]) ** 2
             out[group.indices] = prob
 
         return Backend.from_device(out)
@@ -147,7 +148,7 @@ class ConstantMatterExecutor(GroupedEventExecutor):
                 L = xp.asarray(group.L_km, dtype=Backend.real_dtype()) * KM_TO_EVINV
                 E = xp.asarray(group.E_GeV, dtype=Backend.real_dtype()) * GEV_TO_EV
                 S = self.hamiltonian.get_barger_propagator(L=L, E=E)
-                prob = xp.abs(S[:, group.flavor_emit, group.flavor_det]) ** 2
+                prob = xp.abs(S[:, group.flavor_det, group.flavor_emit]) ** 2
 
                 indices = xp.asarray(group.indices)
                 out[indices] = prob
@@ -241,6 +242,8 @@ class Hamiltonian(HamiltonianBase):
         L = xp.asarray(L)
 
         U = self._mixing.build_mixing_matrix()
+        if self._antineutrino:
+            U = xp.conjugate(U)
         Ud = xp.conjugate(U.T)
         m2 = xp.asarray(self.spectrum.get_m2(), dtype=U.dtype)
         H_vacuum_eV2 = U @ xp.diag(m2) @ Ud
