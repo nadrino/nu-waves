@@ -65,9 +65,10 @@ class WaveFunction:
         eigen_vectors : xp.ndarray
             Shape (nF, nF). Right multiplication assumed.
 
-        For instance, right multiplication assumes:
-            FLAVOR -> MASS: U
-            MASS -> FLAVOR: U_dagger
+        For ket coefficients stored as rows and a PDG mixing matrix U:
+            FLAVOR -> MASS: conjugate(U)
+            MASS -> FLAVOR: U.T
+        For antineutrinos, replace U by conjugate(U) first.
         """
         # H' = U† H U  → ψ' = U† ψ
         # (nE, nFe, nF) @ (nF, nF) -> (nE, nFe, nF)

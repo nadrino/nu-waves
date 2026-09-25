@@ -17,7 +17,7 @@ class VacuumExecutor(GroupedEventExecutor):
 
         for group in compiled_batch.groups:
             Ueff = xp.conjugate(U) if group.isAntiNu else U
-            coeff = Ueff[group.flavor_emit, :] * xp.conjugate(Ueff[group.flavor_det, :])
+            coeff = xp.conjugate(Ueff[group.flavor_emit, :]) * Ueff[group.flavor_det, :]
 
             L = xp.asarray(group.L_km, dtype=Backend.real_dtype()) * KM_TO_EVINV
             E = xp.asarray(group.E_GeV, dtype=Backend.real_dtype()) * GEV_TO_EV
@@ -46,17 +46,14 @@ class Hamiltonian(HamiltonianBase):
         L = xp.asarray(L)
 
         U = self._mixing.build_mixing_matrix()
-        Ud = xp.conjugate(U.T)
-
         if self._antineutrino:
             U = xp.conjugate(U)
-            Ud = xp.conjugate(Ud)
 
         # Rotate psi to mass basis if needed
         if psi.current_basis == Basis.FLAVOR:
             psi.to_basis(
                 target_basis=Basis.MASS,
-                eigen_vectors=U
+                eigen_vectors=xp.conjugate(U)
             )
 
         if psi.current_basis != Basis.MASS:
@@ -69,21 +66,25 @@ class Hamiltonian(HamiltonianBase):
         # Diagonal propagation in mass basis
         psi.values = psi.values * D                             # (nE, nFe, nF)
 
-        # convention
+        # Ket coefficients are stored as rows: mass -> flavor uses U.T.
         psi.to_basis(
             target_basis=Basis.FLAVOR,
-            eigen_vectors=Ud
+            eigen_vectors=U.T
         )
 
     def get_barger_propagator(self, L, E):
         xp = Backend().xp()
+        L = xp.asarray(L)
+        E = xp.asarray(E)
 
         U = self._mixing.build_mixing_matrix()
+        if self._antineutrino:
+            U = xp.conjugate(U)
         Ud = xp.conjugate(U.T)
 
-        phases = 1.267 * (L / E)[:, None] * self._spectrum.get_m2()[None, :]
+        # L and E are in natural units, as in propagate_state.
+        phases = 0.5 * (L / E)[:, None] * self._spectrum.get_m2()[None, :]
         D = xp.exp(-1j * phases)
 
-        S = xp.matmul(U[None, :, :], xp.diag_embed(D))
-        S = xp.matmul(S, Ud[None, :, :])
+        S = (U[None, :, :] * D[:, None, :]) @ Ud
         return S
