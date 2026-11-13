@@ -1,4 +1,5 @@
 from nu_waves.hamiltonian.base import HamiltonianBase
+from nu_waves.hamiltonian.vacuum import Hamiltonian as VacuumHamiltonian
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.state.wave_function import WaveFunction, Basis
 from nu_waves.globals.backend import Backend
@@ -77,15 +78,13 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
         self._preparedCache = {}
 
     def prepareModel(self, model):
-        from nu_waves.hamiltonian.Evolution import vacuumMatrix
-        return vacuumMatrix(*model)
+        return VacuumHamiltonian.vacuumMatrix(*model)
 
     def amplitude(self, group, length, energy, model):
-        from nu_waves.hamiltonian.Evolution import matterEvolution
         vacuum, tangent = model
         rho, fraction = self.hamiltonian.constantDensity
-        propagator, derivatives = matterEvolution(
-            self.hamiltonian, length, 0.5 / energy, vacuum, rho, fraction,
+        propagator, derivatives = self.hamiltonian.matterEvolution(
+            length, 0.5 / energy, vacuum, rho, fraction,
             group.isAntiNu, tangent)
         a, b = group.flavor_emit, group.flavor_det
         return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
@@ -221,14 +220,13 @@ class Hamiltonian(HamiltonianBase):
         E = xp.asarray(E)
         L = xp.asarray(L)
 
-        from nu_waves.hamiltonian.Evolution import vacuumMatrix, matterEvolution
         U = self._mixing.build_mixing_matrix()
         masses = xp.asarray(self.spectrum.get_m2(), dtype=Backend.real_dtype())
-        vacuum, _ = vacuumMatrix(U, masses)
+        vacuum, _ = VacuumHamiltonian.vacuumMatrix(U, masses)
         inv2E = 0.5 / E
 
         def calc_S(L_, rho_, Ye_):
-            return matterEvolution(self, L_, inv2E, vacuum, rho_, Ye_, self._antineutrino)[0]
+            return self.matterEvolution(L_, inv2E, vacuum, rho_, Ye_, self._antineutrino)[0]
 
         if self._matter_profile is not None:
             L_slices = self._matter_profile.resolve_dL(L)
@@ -243,3 +241,37 @@ class Hamiltonian(HamiltonianBase):
             S = calc_S(L, rho, Ye)
 
         return S
+
+    def matterEvolution(self, length, inv2Energy, vacuum, rho, electronFraction,
+                        antineutrino=False, vacuumTangent=None):
+        """Return propagator and optional tangents, sharing the eigendecomposition.
+
+        The Frechet kernel uses normalized sinc and stays finite at degeneracy.
+        Backend.linalg.eigh owns device-specific fallbacks (including MPS).
+        """
+        xp = Backend.xp()
+        sign = -1 if antineutrino else 1
+        if antineutrino:
+            vacuum = xp.conjugate(vacuum)
+        projector = xp.zeros(vacuum.shape, dtype=Backend.complex_dtype())
+        projector[0, 0] = sign * VCOEFF_EV * rho * electronFraction
+        h = vacuum[None, ...] * inv2Energy[:, None, None] + projector[None, ...]
+        values, vectors = self._eigh(h)
+        adjoint = xp.matrix_transpose(xp.conjugate(vectors))
+        phaseValues = values * length[:, None]
+        phases = xp.exp(-1j * phaseValues)
+        propagator = (vectors * phases[:, None, :]) @ adjoint
+        if vacuumTangent is None:
+            return propagator, None
+        if antineutrino:
+            vacuumTangent = xp.conjugate(vacuumTangent)
+        if vacuumTangent.shape[0] == 0:
+            return propagator, []
+        midpoints = 0.5 * (phaseValues[:, :, None] + phaseValues[:, None, :])
+        halfGaps = 0.5 * (phaseValues[:, :, None] - phaseValues[:, None, :])
+        kernel = -1j * length[:, None, None] * xp.exp(-1j * midpoints) * xp.sinc(halfGaps / 3.141592653589793)
+        tangents = []
+        for column in range(vacuumTangent.shape[0]):
+            spectral = adjoint @ (vacuumTangent[column] * inv2Energy[:, None, None]) @ vectors
+            tangents.append(vectors @ (kernel * spectral) @ adjoint)
+        return propagator, tangents

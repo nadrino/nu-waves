@@ -12,14 +12,13 @@ class VacuumExecutor(GroupedEventExecutor):
         return model
 
     def amplitude(self, group, length, energy, model):
-        from nu_waves.hamiltonian.Evolution import vacuumAmplitude
         xp = Backend.xp()
         matrix, masses, dMatrix, dMasses = model
         if group.isAntiNu:
             matrix = xp.conjugate(matrix)
             if dMatrix is not None:
                 dMatrix = xp.conjugate(dMatrix)
-        return vacuumAmplitude(length, energy, matrix, masses, group.flavor_emit,
+        return self.hamiltonian.vacuumAmplitude(length, energy, matrix, masses, group.flavor_emit,
                                group.flavor_det, dMatrix, dMasses)
 
     def probabilityCompiled(self, compiled_batch):
@@ -60,8 +59,7 @@ class Hamiltonian(HamiltonianBase):
             raise ValueError(f"VacuumHamiltonian: unsupported input basis for psi: {psi.current_basis}")
 
         # phases φ_i = 1/2 * Δm_i^2[eV^2] * L[eV-1] / E[eV]
-        from nu_waves.hamiltonian.Evolution import vacuumPhases
-        D = vacuumPhases(L, E, self._spectrum.get_m2())[:, None, :]
+        D = self.vacuumPhases(L, E, self._spectrum.get_m2())[:, None, :]
 
         # Diagonal propagation in mass basis
         psi.values = psi.values * D                             # (nE, nFe, nF)
@@ -83,8 +81,41 @@ class Hamiltonian(HamiltonianBase):
         Ud = xp.conjugate(U.T)
 
         # L and E are in natural units, as in propagate_state.
-        from nu_waves.hamiltonian.Evolution import vacuumPhases
-        D = vacuumPhases(L, E, self._spectrum.get_m2())
+        D = self.vacuumPhases(L, E, self._spectrum.get_m2())
 
         S = (U[None, :, :] * D[:, None, :]) @ Ud
         return S
+
+    @staticmethod
+    def vacuumPhases(length, energy, masses):
+        """Mass-basis phases shared by state and event propagation."""
+        return Backend.xp().exp(-0.5j * (length / energy)[:, None] * masses[None, :])
+
+    @staticmethod
+    def vacuumAmplitude(length, energy, matrix, masses, emit, detect, dMatrix=None, dMasses=None):
+        """Evaluate a flavor amplitude and optional parameter tangents."""
+        xp = Backend.xp()
+        phases = Hamiltonian.vacuumPhases(length, energy, masses)
+        coefficients = xp.conjugate(matrix[emit]) * matrix[detect]
+        amplitude = xp.sum(phases * coefficients[None, :], axis=1)
+        if dMatrix is None:
+            return amplitude, None
+        tangents = []
+        for column in range(dMatrix.shape[0]):
+            dc = xp.conjugate(dMatrix[column, emit]) * matrix[detect] + xp.conjugate(matrix[emit]) * dMatrix[column, detect]
+            tangent = xp.sum(phases * dc[None, :], axis=1)
+            tangent = tangent - 0.5j * (length / energy) * xp.sum(phases * (coefficients * dMasses[column])[None, :], axis=1)
+            tangents.append(tangent)
+        return amplitude, tangents
+
+    @staticmethod
+    def vacuumMatrix(matrix, masses, dMatrix=None, dMasses=None):
+        """Flavor-basis mass-squared operator, also used by matter Hamiltonians."""
+        xp = Backend.xp()
+        adjoint = xp.matrix_transpose(xp.conjugate(matrix))
+        value = (matrix * masses) @ adjoint
+        if dMatrix is None:
+            return value, None
+        tangent = ((dMatrix * masses) @ adjoint + (matrix * dMasses[:, None, :]) @ adjoint
+                   + (matrix * masses) @ xp.matrix_transpose(xp.conjugate(dMatrix)))
+        return value, tangent
