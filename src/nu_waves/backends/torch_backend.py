@@ -43,7 +43,7 @@ class TorchBackend:
                 # H_cpu = self.xp.asarray(H_cpu, device="cpu", dtype=self.xp.complex128)
                 vals, vecs = self.xp.linalg.eigh(H_cpu)
                 # explicitly downcast *on CPU* before returning to MPS
-                vals = vals.to(dtype=self.xp.complex64).to(H.device)
+                vals = vals.to(dtype=self.xp.float32).to(H.device)
                 vecs = vecs.to(dtype=self.xp.complex64).to(H.device)
                 return vals.contiguous(), vecs.contiguous()
             # other devices (cuda/cpu) → native

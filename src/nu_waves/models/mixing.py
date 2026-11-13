@@ -21,7 +21,7 @@ class Mixing:
         self.dirac_phases = dirac_phases if dirac_phases is not None else dict()
         self.majorana_phases = majorana_phases if majorana_phases is not None else dict()
 
-    def build_mixing_matrix(self, include_majorana: bool = False):
+    def build_mixing_matrix(self, include_majorana: bool = False, parameterBasis=None):
         """
         Return the full complex mixing matrix U (dim x dim).
 
@@ -44,6 +44,12 @@ class Mixing:
         # complex_type = np.complex128
         # real_type = np.float64
 
+        # Small model matrices are assembled on CPU once, then transferred.
+        # The rotation product is identical with and without derivatives.
+        if parameterBasis is not None:
+            from nu_waves.propagation.gradient import MixingAngle, DiracPhase
+            parameterBasis = tuple(parameterBasis)
+            derivatives = np.zeros((len(parameterBasis), self.n_neutrinos, self.n_neutrinos), dtype=complex_type)
         U = xp.eye(self.n_neutrinos, dtype=complex_type)
 
         # Build the ordered list of rotation pairs to apply (right-multiplication)
@@ -72,6 +78,20 @@ class Mixing:
             R[ii, jj] = s * xp.exp(-1j * delta)
             R[jj, ii] = -s * xp.exp(+1j * delta)
 
+            if parameterBasis is not None:
+                derivatives = derivatives @ R
+                for column, parameter in enumerate(parameterBasis):
+                    if (parameter.i, parameter.j) != (i, j):
+                        continue
+                    tangent = np.zeros_like(R)
+                    if isinstance(parameter, MixingAngle):
+                        tangent[ii, ii] = tangent[jj, jj] = -s
+                        tangent[ii, jj] = c * xp.exp(-1j * delta)
+                        tangent[jj, ii] = -c * xp.exp(1j * delta)
+                    elif isinstance(parameter, DiracPhase):
+                        tangent[ii, jj] = -1j * R[ii, jj]
+                        tangent[jj, ii] = 1j * R[jj, ii]
+                    derivatives[column] += U @ tangent
             U = U @ R
 
         if include_majorana and any(self.majorana_phases):
@@ -80,9 +100,14 @@ class Mixing:
             phases = xp.array(phases[:self.n_neutrinos], dtype=float)  # trim/pad
             M = xp.diag(xp.exp(0.5j * phases))
             U = U @ M
+            if parameterBasis is not None:
+                derivatives = derivatives @ M
 
         # make sure it is returned on the right device
-        return Backend.xp().asarray(U, dtype=Backend.complex_dtype())
+        matrix = Backend.xp().asarray(U, dtype=Backend.complex_dtype())
+        if parameterBasis is not None:
+            return matrix, Backend.xp().asarray(derivatives, dtype=Backend.complex_dtype())
+        return matrix
 
 
 # inline example

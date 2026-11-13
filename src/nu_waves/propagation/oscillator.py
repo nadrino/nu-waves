@@ -62,33 +62,49 @@ class Oscillator:
         self._executor = None
         self._executorSignature = None
 
-    def probabilityWithGradient(self, events, parameterBasis):
-        """Compute vacuum/constant-matter probabilities and their physical Jacobian.
+    def probabilityWithGradient(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None, *, parameterBasis=None):
+        """Compatibility wrapper for probability(..., parameterBasis=basis).
 
-        Accepts the same event batches/lists and compiled batches as probability.
-        Columns follow parameterBasis, including subsets and repeated entries.
-        This gradient path runs on CPU in float64. Matter density and electron
-        fraction are held fixed; layered matter profiles are not supported.
+        The former positional (events, basis) form is also accepted.
         """
-        from nu_waves.hamiltonian.vacuum import Hamiltonian
-        from nu_waves.hamiltonian.matter import Hamiltonian as MatterHamiltonian
-        from nu_waves.propagation.gradient import (
-            vacuumProbabilityWithGradient, constantMatterProbabilityWithGradient,
-        )
+        if parameterBasis is None:
+            parameterBasis, E_GeV = E_GeV, None
+        if parameterBasis is None:
+            raise TypeError("A parameterBasis is required for gradient evaluation.")
+        return self.probability(L_km, E_GeV, flavor_emit, flavor_det, parameterBasis=parameterBasis)
 
-        if type(self.hamiltonian) is Hamiltonian:
-            evaluate = vacuumProbabilityWithGradient
-        elif type(self.hamiltonian) is MatterHamiltonian:
-            if self.hamiltonian._matter_profile is not None:
-                raise NotImplementedError("Analytic matter gradients require constant density.")
-            evaluate = constantMatterProbabilityWithGradient
-        else:
-            raise NotImplementedError("Analytic gradients support vacuum and constant matter only.")
-        return evaluate(
-            self.hamiltonian, self.compileEvents(events), parameterBasis
-        )
+    def probability(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None, *, parameterBasis=None):
+        """Return probabilities, or (probabilities, Jacobian) when a basis is given.
 
-    def probability(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None):
+        Jacobian axes append parameterBasis order to the probability shape.
+        Model preparation and propagation use the same backend for both paths.
+        """
+        if parameterBasis is not None:
+            basis = tuple(parameterBasis)
+            if isinstance(L_km, CompiledEventBatch) or self._is_event_arg(L_km):
+                if E_GeV is not None or flavor_emit is not None or flavor_det is not None:
+                    raise TypeError("Event gradient calls must only pass events and parameterBasis.")
+                return self._getExecutor().probabilityWithGradientCompiled(self.compileEvents(L_km), basis)
+            if E_GeV is None:
+                raise TypeError("Oscillator.probability() missing required argument: 'E_GeV'")
+            L, E = self._generate_L_and_E_arrays(L_km, E_GeV)
+            emitted = self._format_flavor_arg(flavor_emit)
+            detected = self._format_flavor_arg(flavor_det)
+            # Flatten channels with energy as the leading axis, matching legacy.
+            lCpu, eCpu = Backend.from_device(L), Backend.from_device(E)
+            count = len(emitted) * len(detected)
+            events = NeutrinoEventBatch(
+                np.repeat(lCpu, count), np.repeat(eCpu, count),
+                np.tile(np.repeat(emitted, len(detected)), len(lCpu)),
+                np.tile(detected, len(lCpu) * len(emitted)),
+                np.full(len(lCpu) * count, self.hamiltonian._antineutrino))
+            probabilities, gradients = self._getExecutor().probabilityWithGradientCompiled(self.compileEvents(events), basis)
+            shape = (len(lCpu), len(emitted), len(detected))
+            probabilities = probabilities.reshape(shape)
+            gradients = gradients.reshape(shape + (len(basis),))
+            # Squeeze only probability axes; the parameter axis is always kept.
+            squeezed = tuple(size for size in shape if size != 1)
+            return probabilities.reshape(squeezed), gradients.reshape(squeezed + (len(basis),))
         if isinstance(L_km, CompiledEventBatch):
             if E_GeV is not None or flavor_emit is not None or flavor_det is not None:
                 raise TypeError(

@@ -12,6 +12,8 @@ class Backend:
     @classmethod
     def set_api(cls, module, device=None):
         """Set xp backend: numpy, torch, cupy, jax.numpy, etc."""
+        cls._real_dtype, cls._complex_dtype = "float64", "complex128"
+        cls._device = None
         cls._api_name = module.__name__
         if cls._api_name == "torch":
             from nu_waves.backends.torch_backend import TorchBackend
@@ -65,7 +67,7 @@ class Backend:
         """Pull array back to CPU (NumPy)."""
         xp = cls._current_api
         if "torch" in xp.__name__:
-            return arr.detach().cpu().numpy()
+            return arr.detach().resolve_conj().resolve_neg().cpu().numpy()
         elif "cupy" in xp.__name__:
             import cupy as cp
             return cp.asnumpy(arr)

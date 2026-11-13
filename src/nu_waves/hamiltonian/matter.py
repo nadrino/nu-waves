@@ -76,31 +76,27 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
         super().__init__(oscillator=oscillator)
         self._preparedCache = {}
 
+    def prepareModel(self, model):
+        from nu_waves.hamiltonian.Evolution import vacuumMatrix
+        return vacuumMatrix(*model)
+
+    def amplitude(self, group, length, energy, model):
+        from nu_waves.hamiltonian.Evolution import matterEvolution
+        vacuum, tangent = model
+        rho, fraction = self.hamiltonian.constantDensity
+        propagator, derivatives = matterEvolution(
+            self.hamiltonian, length, 0.5 / energy, vacuum, rho, fraction,
+            group.isAntiNu, tangent)
+        a, b = group.flavor_emit, group.flavor_det
+        return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
+
     def probabilityCompiled(self, compiled_batch):
-        xp = Backend.xp()
-        prepared = self._prepareCompiledBatch(compiled_batch)
-        out = xp.empty((prepared.n_events,), dtype=Backend.real_dtype())
+        from nu_waves.hamiltonian.executors import evaluateCompiled
+        return evaluateCompiled(self, compiled_batch)
 
-        U = self.hamiltonian.mixing.build_mixing_matrix()
-        Ud = xp.conjugate(U.T)
-        m2 = xp.asarray(self.hamiltonian.spectrum.get_m2(), dtype=U.dtype)
-        H_vacuum_eV2 = U @ xp.diag(m2) @ Ud
-
-        flavor_projector = xp.zeros((self.hamiltonian.n_neutrinos, self.hamiltonian.n_neutrinos), dtype=Backend.complex_dtype())
-        flavor_projector[0, 0] = 1.0
-        matter_potential = VCOEFF_EV * self.hamiltonian.constantDensity[0] * self.hamiltonian.constantDensity[1]
-
-        for group in prepared.groups:
-            signA = -1.0 if group.isAntiNu else 1.0
-            Hvacuum = xp.conjugate(H_vacuum_eV2) if group.isAntiNu else H_vacuum_eV2
-            H = Hvacuum[None, ...] * group.inv2E[:, None, None] + (signA * matter_potential) * flavor_projector[None, ...]
-            eigen_values, eigen_vectors = self.hamiltonian._eigh(H)
-            phases = xp.exp((-1j) * eigen_values * group.L[:, None])
-            S = (eigen_vectors * phases[:, None, :]) @ xp.matrix_transpose(xp.conjugate(eigen_vectors))
-            prob = xp.abs(S[:, group.flavor_det, group.flavor_emit]) ** 2
-            out[group.indices] = prob
-
-        return Backend.from_device(out)
+    def probabilityWithGradientCompiled(self, compiledBatch, parameterBasis):
+        from nu_waves.hamiltonian.executors import evaluateCompiled
+        return evaluateCompiled(self, compiledBatch, parameterBasis)
 
     def _prepareCompiledBatch(self, compiled_batch):
         if isinstance(compiled_batch, CompiledConstantMatterBatch):
@@ -111,9 +107,9 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
             getattr(Backend.xp(), "__name__", Backend.xp().__class__.__name__),
             str(getattr(Backend.xp(), "device", None)),
         )
-        prepared = self._preparedCache.get(cache_key)
-        if prepared is not None:
-            return prepared
+        cached = self._preparedCache.get(cache_key)
+        if cached is not None and cached[0] is compiled_batch:
+            return cached[1]
 
         xp = Backend.xp()
         groups = []
@@ -132,30 +128,14 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
             n_events=compiled_batch.n_events,
             groups=tuple(groups),
         )
-        self._preparedCache[cache_key] = prepared
+        # Keep the source alive: Python can otherwise reuse its id for a
+        # different batch, returning stale energies and baselines.
+        self._preparedCache[cache_key] = (compiled_batch, prepared)
         return prepared
 
 
-class ConstantMatterExecutor(GroupedEventExecutor):
-    def probabilityCompiled(self, compiled_batch):
-        xp = Backend.xp()
-        out = xp.empty((compiled_batch.n_events,), dtype=Backend.real_dtype())
-        original_antineutrino = self.hamiltonian._antineutrino
-
-        try:
-            for group in compiled_batch.groups:
-                self.hamiltonian.set_antineutrino(group.isAntiNu)
-                L = xp.asarray(group.L_km, dtype=Backend.real_dtype()) * KM_TO_EVINV
-                E = xp.asarray(group.E_GeV, dtype=Backend.real_dtype()) * GEV_TO_EV
-                S = self.hamiltonian.get_barger_propagator(L=L, E=E)
-                prob = xp.abs(S[:, group.flavor_det, group.flavor_emit]) ** 2
-
-                indices = xp.asarray(group.indices)
-                out[indices] = prob
-        finally:
-            self.hamiltonian.set_antineutrino(original_antineutrino)
-
-        return Backend.from_device(out)
+class ConstantMatterExecutor(ConstantMatterOptimizedExecutor):
+    pass
 
 
 class LayeredMatterExecutor(GroupedEventExecutor):
@@ -241,30 +221,14 @@ class Hamiltonian(HamiltonianBase):
         E = xp.asarray(E)
         L = xp.asarray(L)
 
+        from nu_waves.hamiltonian.Evolution import vacuumMatrix, matterEvolution
         U = self._mixing.build_mixing_matrix()
-        if self._antineutrino:
-            U = xp.conjugate(U)
-        Ud = xp.conjugate(U.T)
-        m2 = xp.asarray(self.spectrum.get_m2(), dtype=U.dtype)
-        H_vacuum_eV2 = U @ xp.diag(m2) @ Ud
-
-        import numpy as np
-        flavor_projector = np.zeros((self.n_neutrinos, self.n_neutrinos), dtype=np.complex128)
-        flavor_projector[0, 0] = 1.0  # only electron neutrinos feel the potential
-
-        # transferring back to device if needed
-        flavor_projector = xp.asarray(flavor_projector, dtype=Backend.complex_dtype())
-
-        signA = -1.0 if self._antineutrino else 1.0
-        inv2E = (0.5 / E)[:, None, None] # used for the hamiltonian
+        masses = xp.asarray(self.spectrum.get_m2(), dtype=Backend.real_dtype())
+        vacuum, _ = vacuumMatrix(U, masses)
+        inv2E = 0.5 / E
 
         def calc_S(L_, rho_, Ye_):
-            matter_potential = signA * (VCOEFF_EV * rho_ * Ye_)
-            H = H_vacuum_eV2[None, ...] * inv2E + matter_potential * flavor_projector[None, ...]
-            eigen_values, eigen_vectors = self._eigh(H)
-            phases = xp.exp((-1j) * eigen_values * L_[..., None])
-            S = (eigen_vectors * phases[:, None, :]) @ xp.matrix_transpose(xp.conjugate(eigen_vectors))
-            return S
+            return matterEvolution(self, L_, inv2E, vacuum, rho_, Ye_, self._antineutrino)[0]
 
         if self._matter_profile is not None:
             L_slices = self._matter_profile.resolve_dL(L)

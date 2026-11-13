@@ -106,3 +106,18 @@ plt.tight_layout()
 plt.show()
 ```
 
+
+### Analytic probability gradients
+
+Vacuum and constant-density matter Hamiltonians support physical parameter
+Jacobians through the same interface as probability evaluation:
+
+```python
+from nu_waves.propagation.gradient import MixingAngle, DiracPhase, MassSquaredDifference
+
+probabilities, gradients = osc.probability(
+    L_km=295.0, E_GeV=energies,
+    flavor_emit=flavors.muon, flavor_det=flavors.electron,
+    parameterBasis=[MixingAngle(2, 3), DiracPhase(1, 3), MassSquaredDifference(3, 2)],
+)
+```
