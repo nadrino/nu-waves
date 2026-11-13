@@ -26,12 +26,14 @@ class MassSquaredDifference:
 
 @dataclass(frozen=True)
 class MatterDensity:
-    """Constant density in g/cm³, holding electron fraction fixed."""
+    """Density in g/cm³; layered profiles require a zero-based layerIndex."""
+    layerIndex: int | None = None
 
 
 @dataclass(frozen=True)
 class ElectronFraction:
-    """Dimensionless electron fraction, holding density fixed."""
+    """Electron fraction; layered profiles require a zero-based layerIndex."""
+    layerIndex: int | None = None
 
 
 def buildMixingGradient(mixing, parameterBasis):
@@ -79,8 +81,14 @@ def validateParameterBasis(hamiltonian, parameterBasis):
     for p in parameterBasis:
         if type(p) in (MatterDensity, ElectronFraction):
             from nu_waves.hamiltonian.matter import Hamiltonian
-            if not isinstance(hamiltonian, Hamiltonian) or hamiltonian._matter_profile is not None:
-                raise ValueError("Matter parameters require a constant-matter Hamiltonian.")
+            if not isinstance(hamiltonian, Hamiltonian):
+                raise ValueError("Matter parameters require a matter Hamiltonian.")
+            profile = hamiltonian._matter_profile
+            if profile is None:
+                if p.layerIndex is not None:
+                    raise ValueError("A layerIndex requires a layered matter profile.")
+            elif type(p.layerIndex) is not int or not 0 <= p.layerIndex < len(profile.layers):
+                raise ValueError("A layered matter parameter requires a valid zero-based layerIndex.")
             continue
         if type(p) not in (MixingAngle, DiracPhase, MassSquaredDifference):
             raise TypeError(f"Unsupported gradient parameter: {p!r}")

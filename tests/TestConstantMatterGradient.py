@@ -100,11 +100,11 @@ class TestConstantMatterGradient(unittest.TestCase):
             self.assertTrue(np.isfinite(p).all())
             np.testing.assert_allclose(g, 0, atol=1e-12)
 
-    def testRejectLayeredMatter(self):
+    def testRejectAmbiguousLayerParameter(self):
         osc = self.makeOscillator(self.values)
         osc.hamiltonian.set_matter_profile(matter.MatterProfile.from_fractions([2.6, 3.], [.5, .5], [.5, .5]))
-        with self.assertRaises(NotImplementedError):
-            osc.probabilityWithGradient(self.makeEvents(), self.basis)
+        with self.assertRaises(ValueError):
+            osc.probabilityWithGradient(self.makeEvents(), [MatterDensity()])
 
     def testMatterParameters(self):
         events = self.makeEvents()

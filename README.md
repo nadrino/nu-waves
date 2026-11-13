@@ -109,7 +109,7 @@ plt.show()
 
 ### Analytic probability gradients
 
-Vacuum and constant-density matter Hamiltonians support physical parameter
+Vacuum, constant-density and layered matter Hamiltonians support physical parameter
 Jacobians through the same interface as probability evaluation:
 
 ```python
@@ -135,9 +135,38 @@ probabilities, gradients = osc.probability(
 
 The density derivative uses g/cm³ as its input unit; electron fraction is
 dimensionless. Each partial derivative holds the other parameters fixed.
-These parameters require a constant-matter Hamiltonian and can be mixed,
+These parameters require a matter Hamiltonian and can be mixed,
 reordered or repeated in the basis. Their contributions are added directly to
 the Hamiltonian tangent, reusing the same eigendecomposition. No division by
 density or electron fraction is needed, so zero values are supported.
 Since the potential depends on their product, the derivatives satisfy
 `rho * dP/drho = Ye * dP/dYe`.
+
+For layered profiles, select each density or electron fraction using an explicit
+zero-based `layerIndex`:
+
+```python
+from nu_waves.hamiltonian.matter import MatterProfile
+
+osc.hamiltonian.set_matter_profile(MatterProfile.from_fractions(
+    rho_gcm3=[2.6, 4.1], Ye=[0.5, 0.47], fractions=[0.4, 0.6],
+))
+probabilities, gradients = osc.probability(
+    events,
+    parameterBasis=[MixingAngle(2, 3), MatterDensity(layerIndex=0),
+                    ElectronFraction(layerIndex=1)],
+)
+```
+
+Both fractional profiles and absolute segments (`from_segments`, lengths in km)
+are supported. Layers are applied in their declared traversal order. Layer widths
+remain fixed; oscillation parameters affect every layer, while an indexed matter
+parameter affects only its selected layer. A missing or invalid layer index is
+rejected for layered profiles. Constant-density media continue to use
+`MatterDensity()` and `ElectronFraction()` without an index.
+
+Probability-only evaluation and gradients share the same layer-product kernel.
+Derivatives use `d(U S) = dU S + U dS`, reusing one eigendecomposition per layer
+and event for all requested parameters. No tangent arrays are allocated when
+`parameterBasis` is omitted. NumPy and Torch CPU/CUDA/MPS use the same kernels;
+MPS retains the backend's existing CPU fallback for eigendecomposition.

@@ -16,7 +16,7 @@ import time
 class MatterLayer:
     rho_in_g_per_cm3: float     # matter density
     Ye: float                   # avg number of electrons per nucleon (0.5 by default)
-    weight: float               # either absolute length [eV^-1] or fraction [0..1]
+    weight: float               # either absolute length [km] or fraction [0..1]
 
 
 @dataclass
@@ -26,8 +26,8 @@ class MatterProfile:
 
     @staticmethod
     def from_fractions(rho_gcm3, Ye, fractions) -> "MatterProfile":
-        fr = Backend.xp().asarray(fractions, float)
-        Ls = [MatterLayer(r, y, w) for r, y, w in zip(rho_gcm3, Ye, fr)]
+        # Profile metadata stays on CPU; resolve_dL creates device arrays.
+        Ls = [MatterLayer(r, y, float(w)) for r, y, w in zip(rho_gcm3, Ye, fractions)]
         return MatterProfile(Ls, "fraction")
 
     @staticmethod
@@ -81,15 +81,8 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
         vacuum, tangent = VacuumHamiltonian.vacuumMatrix(*model)
         potentialTangent = None
         if parameterBasis is not None:
-            from nu_waves.propagation.gradient import MatterDensity, ElectronFraction
-            xp = Backend.xp()
             rho, fraction = self.hamiltonian.constantDensity
-            potentialTangent = xp.zeros(tangent.shape, dtype=Backend.complex_dtype())
-            for column, parameter in enumerate(parameterBasis):
-                if isinstance(parameter, MatterDensity):
-                    potentialTangent[column, 0, 0] = VCOEFF_EV * fraction
-                elif isinstance(parameter, ElectronFraction):
-                    potentialTangent[column, 0, 0] = VCOEFF_EV * rho
+            potentialTangent = self.hamiltonian.potentialTangents(rho, fraction, parameterBasis)
         return vacuum, tangent, potentialTangent
 
     def amplitude(self, group, length, energy, model):
@@ -149,25 +142,22 @@ class ConstantMatterExecutor(ConstantMatterOptimizedExecutor):
     pass
 
 
-class LayeredMatterExecutor(GroupedEventExecutor):
-    def probabilityCompiled(self, compiled_batch):
-        out = np.empty(compiled_batch.n_events, dtype=float)
-        original_antineutrino = self.hamiltonian._antineutrino
+class LayeredMatterExecutor(ConstantMatterOptimizedExecutor):
+    def prepareModel(self, model, parameterBasis=None):
+        vacuum, tangent = VacuumHamiltonian.vacuumMatrix(*model)
+        potentials = None
+        if parameterBasis is not None:
+            potentials = [self.hamiltonian.potentialTangents(
+                layer.rho_in_g_per_cm3, layer.Ye, parameterBasis, index)
+                for index, layer in enumerate(self.hamiltonian._matter_profile.layers)]
+        return vacuum, tangent, potentials
 
-        try:
-            for group in compiled_batch.groups:
-                self.hamiltonian.set_antineutrino(group.isAntiNu)
-                probs = self.oscillator._probability_legacy(
-                    L_km=group.L_km,
-                    E_GeV=group.E_GeV,
-                    flavor_emit=group.flavor_emit,
-                    flavor_det=group.flavor_det,
-                )
-                out[group.indices] = np.asarray(probs, dtype=float).reshape(-1)
-        finally:
-            self.hamiltonian.set_antineutrino(original_antineutrino)
-
-        return out
+    def amplitude(self, group, length, energy, model):
+        vacuum, tangent, potentials = model
+        propagator, derivatives = self.hamiltonian.profileEvolution(
+            length, 0.5 / energy, vacuum, group.isAntiNu, tangent, potentials)
+        a, b = group.flavor_emit, group.flavor_det
+        return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
 
 
 class Hamiltonian(HamiltonianBase):
@@ -237,22 +227,50 @@ class Hamiltonian(HamiltonianBase):
         vacuum, _ = VacuumHamiltonian.vacuumMatrix(U, masses)
         inv2E = 0.5 / E
 
-        def calc_S(L_, rho_, Ye_):
-            return self.matterEvolution(L_, inv2E, vacuum, rho_, Ye_, self._antineutrino)[0]
-
         if self._matter_profile is not None:
-            L_slices = self._matter_profile.resolve_dL(L)
-            # Create a (1, n_nu, n_nu) identity matrix in complex dtype for initialization
-            S = xp.eye(self.n_neutrinos, dtype=Backend.complex_dtype())[None, ...]
-            # Broadcast the identity across all energies and make it writable (hence the .copy)
-            S = xp.copy(xp.broadcast_to(S, (E.shape[0], self.n_neutrinos, self.n_neutrinos)))
-            for k, layer in enumerate(self._matter_profile.layers):
-                S = calc_S(L_slices[k], layer.rho_in_g_per_cm3, layer.Ye) @ S
+            S = self.profileEvolution(L, inv2E, vacuum, self._antineutrino)[0]
         else:
             rho, Ye = self._constant_profile
-            S = calc_S(L, rho, Ye)
+            S = self.matterEvolution(L, inv2E, vacuum, rho, Ye, self._antineutrino)[0]
 
         return S
+
+    def potentialTangents(self, rho, fraction, parameterBasis, layerIndex=None):
+        """Neutrino potential derivatives for a constant medium or one layer."""
+        from nu_waves.propagation.gradient import MatterDensity, ElectronFraction
+        xp = Backend.xp()
+        tangents = xp.zeros((len(parameterBasis), self.n_neutrinos, self.n_neutrinos),
+                            dtype=Backend.complex_dtype())
+        for column, parameter in enumerate(parameterBasis):
+            if isinstance(parameter, (MatterDensity, ElectronFraction)) and parameter.layerIndex == layerIndex:
+                value = fraction if isinstance(parameter, MatterDensity) else rho
+                tangents[column, 0, 0] = VCOEFF_EV * value
+        return tangents
+
+    def profileEvolution(self, length, inv2Energy, vacuum, antineutrino=False,
+                         vacuumTangent=None, potentialTangents=None):
+        """Compose layers in traversal order and differentiate their product.
+
+        Layer widths remain fixed. The recurrence uses the previous propagator
+        in both terms: d(U S) = dU S + U dS. Probability-only calls allocate no
+        tangent matrices and use the same per-layer evolution kernel.
+        """
+        xp = Backend.xp()
+        shape = (length.shape[0], self.n_neutrinos, self.n_neutrinos)
+        propagator = xp.copy(xp.broadcast_to(xp.eye(self.n_neutrinos,
+                              dtype=Backend.complex_dtype()), shape))
+        derivatives = None if vacuumTangent is None else [
+            xp.zeros(shape, dtype=Backend.complex_dtype()) for _ in range(vacuumTangent.shape[0])]
+        widths = self._matter_profile.resolve_dL(length)
+        for index, layer in enumerate(self._matter_profile.layers):
+            potential = None if potentialTangents is None else potentialTangents[index]
+            step, tangents = self.matterEvolution(widths[index], inv2Energy, vacuum,
+                layer.rho_in_g_per_cm3, layer.Ye, antineutrino, vacuumTangent, potential)
+            if derivatives is not None:
+                derivatives = [tangent @ propagator + step @ previous
+                               for tangent, previous in zip(tangents, derivatives)]
+            propagator = step @ propagator
+        return propagator, derivatives
 
     def matterEvolution(self, length, inv2Energy, vacuum, rho, electronFraction,
                         antineutrino=False, vacuumTangent=None, potentialTangent=None):
