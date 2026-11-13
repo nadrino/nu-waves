@@ -9,7 +9,7 @@ from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.hamiltonian import matter, vacuum
 from nu_waves.propagation.oscillator import Oscillator, NeutrinoEventBatch
-from nu_waves.propagation.gradient import MixingAngle, DiracPhase, MassSquaredDifference
+from nu_waves.propagation.gradient import MixingAngle, DiracPhase, MassSquaredDifference, MatterDensity, ElectronFraction
 
 
 class TestGradientBackend(unittest.TestCase):
@@ -60,26 +60,33 @@ class TestGradientBackend(unittest.TestCase):
         events = NeutrinoEventBatch([295., 1300., 295.], [.6, 1.2, .7], [1, 1, 0], [0, 1, 2], [False, True, False])
         for useMatter in [False, True]:
             Backend.set_api(np)
-            reference = self.makeOscillator(useMatter).probability(events, parameterBasis=self.basis)
+            basis = self.basis + ([MatterDensity(), ElectronFraction()] if useMatter else [])
+            reference = self.makeOscillator(useMatter).probability(events, parameterBasis=basis)
             Backend.set_api(torch, device=device)
             osc = self.makeOscillator(useMatter)
-            p, g = osc.probability(events, parameterBasis=self.basis)
+            p, g = osc.probability(events, parameterBasis=basis)
             tolerance = dict(rtol=3e-4, atol=3e-3) if device == 'mps' else dict(rtol=1e-10, atol=1e-10)
             np.testing.assert_allclose(p, reference[0], **tolerance)
             np.testing.assert_allclose(g, reference[1], **tolerance)
             np.testing.assert_allclose(p, osc.probability(events), **tolerance)
             # Propagation intermediates must stay on the configured device.
             from nu_waves.propagation.gradient import prepareModel
-            model = osc._getExecutor().prepareModel(prepareModel(osc.hamiltonian, self.basis))
+            model = osc._getExecutor().prepareModel(prepareModel(osc.hamiltonian, basis), basis)
             for value in model:
                 if value is not None:
                     self.assertEqual(value.device.type, device)
-            plus, minus = self.makeOscillator(useMatter), self.makeOscillator(useMatter)
-            step = 1e-3 if device == 'mps' else 1e-6
-            plus.hamiltonian.mixing.mixing_angles[(2, 3)] += step
-            minus.hamiltonian.mixing.mixing_angles[(2, 3)] -= step
-            numerical = (plus.probability(events) - minus.probability(events)) / (2 * step)
+            # Single-precision MPS needs larger steps than CPU double precision.
+            # Fourth-order differences keep truncation error small at those steps.
+            step = 2e-2 if device == 'mps' else 1e-3
+            def shiftedProbability(offset):
+                shifted = self.makeOscillator(useMatter)
+                shifted.hamiltonian.mixing.mixing_angles[(2, 3)] += offset * step
+                return shifted.probability(events)
+            numerical = (shiftedProbability(-2) - 8*shiftedProbability(-1)
+                         + 8*shiftedProbability(1) - shiftedProbability(2)) / (12*step)
             np.testing.assert_allclose(g[:, 0], numerical, rtol=3e-3, atol=3e-4)
+            if useMatter:
+                np.testing.assert_allclose(g[:, 3:], reference[1][:, 3:], rtol=2e-3, atol=2e-6)
 
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
     def testTorchCpu(self):

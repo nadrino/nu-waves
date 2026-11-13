@@ -33,7 +33,7 @@ def evaluateCompiled(executor, compiledBatch, parameterBasis=None):
 
     xp = Backend.xp()
     model = prepareModel(executor.hamiltonian, parameterBasis)
-    prepared = executor.prepareModel(model)
+    prepared = executor.prepareModel(model, parameterBasis)
     if hasattr(executor, "_prepareCompiledBatch"):
         compiledBatch = executor._prepareCompiledBatch(compiledBatch)
     out = xp.empty((compiledBatch.n_events,), dtype=Backend.real_dtype())

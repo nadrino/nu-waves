@@ -77,15 +77,27 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
         super().__init__(oscillator=oscillator)
         self._preparedCache = {}
 
-    def prepareModel(self, model):
-        return VacuumHamiltonian.vacuumMatrix(*model)
+    def prepareModel(self, model, parameterBasis=None):
+        vacuum, tangent = VacuumHamiltonian.vacuumMatrix(*model)
+        potentialTangent = None
+        if parameterBasis is not None:
+            from nu_waves.propagation.gradient import MatterDensity, ElectronFraction
+            xp = Backend.xp()
+            rho, fraction = self.hamiltonian.constantDensity
+            potentialTangent = xp.zeros(tangent.shape, dtype=Backend.complex_dtype())
+            for column, parameter in enumerate(parameterBasis):
+                if isinstance(parameter, MatterDensity):
+                    potentialTangent[column, 0, 0] = VCOEFF_EV * fraction
+                elif isinstance(parameter, ElectronFraction):
+                    potentialTangent[column, 0, 0] = VCOEFF_EV * rho
+        return vacuum, tangent, potentialTangent
 
     def amplitude(self, group, length, energy, model):
-        vacuum, tangent = model
+        vacuum, tangent, potentialTangent = model
         rho, fraction = self.hamiltonian.constantDensity
         propagator, derivatives = self.hamiltonian.matterEvolution(
             length, 0.5 / energy, vacuum, rho, fraction,
-            group.isAntiNu, tangent)
+            group.isAntiNu, tangent, potentialTangent)
         a, b = group.flavor_emit, group.flavor_det
         return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
 
@@ -243,11 +255,14 @@ class Hamiltonian(HamiltonianBase):
         return S
 
     def matterEvolution(self, length, inv2Energy, vacuum, rho, electronFraction,
-                        antineutrino=False, vacuumTangent=None):
+                        antineutrino=False, vacuumTangent=None, potentialTangent=None):
         """Return propagator and optional tangents, sharing the eigendecomposition.
 
         The Frechet kernel uses normalized sinc and stays finite at degeneracy.
         Backend.linalg.eigh owns device-specific fallbacks (including MPS).
+        vacuumTangent contains mass-squared operator derivatives; optional
+        potentialTangent contains neutrino potential derivatives in eV. The
+        latter receives the antineutrino sign here, without energy scaling.
         """
         xp = Backend.xp()
         sign = -1 if antineutrino else 1
@@ -272,6 +287,9 @@ class Hamiltonian(HamiltonianBase):
         kernel = -1j * length[:, None, None] * xp.exp(-1j * midpoints) * xp.sinc(halfGaps / 3.141592653589793)
         tangents = []
         for column in range(vacuumTangent.shape[0]):
-            spectral = adjoint @ (vacuumTangent[column] * inv2Energy[:, None, None]) @ vectors
+            hTangent = vacuumTangent[column] * inv2Energy[:, None, None]
+            if potentialTangent is not None:
+                hTangent = hTangent + sign * potentialTangent[column]
+            spectral = adjoint @ hTangent @ vectors
             tangents.append(vectors @ (kernel * spectral) @ adjoint)
         return propagator, tangents

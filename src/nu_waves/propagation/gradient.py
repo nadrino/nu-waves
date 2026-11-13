@@ -24,6 +24,16 @@ class MassSquaredDifference:
     j: int
 
 
+@dataclass(frozen=True)
+class MatterDensity:
+    """Constant density in g/cm³, holding electron fraction fixed."""
+
+
+@dataclass(frozen=True)
+class ElectronFraction:
+    """Dimensionless electron fraction, holding density fixed."""
+
+
 def buildMixingGradient(mixing, parameterBasis):
     """Compatibility wrapper around the model's common rotation product."""
     return mixing.build_mixing_matrix(parameterBasis=parameterBasis)
@@ -67,6 +77,11 @@ def validateParameterBasis(hamiltonian, parameterBasis):
     """Validate ordered physical parameter references against the model."""
     mixing, spectrum = hamiltonian.mixing, hamiltonian.spectrum
     for p in parameterBasis:
+        if type(p) in (MatterDensity, ElectronFraction):
+            from nu_waves.hamiltonian.matter import Hamiltonian
+            if not isinstance(hamiltonian, Hamiltonian) or hamiltonian._matter_profile is not None:
+                raise ValueError("Matter parameters require a constant-matter Hamiltonian.")
+            continue
         if type(p) not in (MixingAngle, DiracPhase, MassSquaredDifference):
             raise TypeError(f"Unsupported gradient parameter: {p!r}")
         pair = (p.i, p.j)

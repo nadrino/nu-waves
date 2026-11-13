@@ -8,7 +8,7 @@ from nu_waves.utils.units import GEV_TO_EV, KM_TO_EVINV
 
 
 class VacuumExecutor(GroupedEventExecutor):
-    def prepareModel(self, model):
+    def prepareModel(self, model, parameterBasis=None):
         return model
 
     def amplitude(self, group, length, energy, model):

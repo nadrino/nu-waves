@@ -121,3 +121,23 @@ probabilities, gradients = osc.probability(
     parameterBasis=[MixingAngle(2, 3), DiracPhase(1, 3), MassSquaredDifference(3, 2)],
 )
 ```
+
+For constant matter, the basis may also contain density and electron fraction:
+
+```python
+from nu_waves.propagation.gradient import MatterDensity, ElectronFraction
+
+probabilities, gradients = osc.probability(
+    events,
+    parameterBasis=[MixingAngle(2, 3), MatterDensity(), ElectronFraction()],
+)
+```
+
+The density derivative uses g/cm³ as its input unit; electron fraction is
+dimensionless. Each partial derivative holds the other parameters fixed.
+These parameters require a constant-matter Hamiltonian and can be mixed,
+reordered or repeated in the basis. Their contributions are added directly to
+the Hamiltonian tangent, reusing the same eigendecomposition. No division by
+density or electron fraction is needed, so zero values are supported.
+Since the potential depends on their product, the derivatives satisfy
+`rho * dP/drho = Ye * dP/dYe`.

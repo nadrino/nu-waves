@@ -81,7 +81,7 @@ class Mixing:
             if parameterBasis is not None:
                 derivatives = derivatives @ R
                 for column, parameter in enumerate(parameterBasis):
-                    if (parameter.i, parameter.j) != (i, j):
+                    if not isinstance(parameter, (MixingAngle, DiracPhase)) or (parameter.i, parameter.j) != (i, j):
                         continue
                     tangent = np.zeros_like(R)
                     if isinstance(parameter, MixingAngle):

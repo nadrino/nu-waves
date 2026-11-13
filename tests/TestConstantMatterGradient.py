@@ -6,7 +6,9 @@ from nu_waves.hamiltonian import matter, vacuum
 from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.propagation.oscillator import Oscillator, NeutrinoEventBatch
-from nu_waves.propagation.gradient import MixingAngle, DiracPhase, MassSquaredDifference
+from nu_waves.propagation.gradient import (
+    MixingAngle, DiracPhase, MassSquaredDifference, MatterDensity, ElectronFraction,
+)
 
 
 class TestConstantMatterGradient(unittest.TestCase):
@@ -50,13 +52,16 @@ class TestConstantMatterGradient(unittest.TestCase):
                         osc.hamiltonian.enableConstantMatterBatchOptimization = optimized
                         np.testing.assert_allclose(probability, osc.probability(compiled), atol=3e-13)
                     for column, parameter in enumerate(requested):
-                        for factor in [1., .25]:
-                            step = factor * (1e-9 if isinstance(parameter, MassSquaredDifference) else 1e-6)
-                            plus, minus = values.copy(), values.copy()
-                            plus[column] += step
-                            minus[column] -= step
-                            numerical = (self.makeOscillator(plus, n).probability(compiled) -
-                                         self.makeOscillator(minus, n).probability(compiled)) / (2*step)
+                        for factor in [1., .5]:
+                            # Fourth-order differences allow larger steps, avoiding
+                            # cancellation noise from repeated eigendecompositions.
+                            step = factor * (1e-7 if isinstance(parameter, MassSquaredDifference) else 1e-3)
+                            def shiftedProbability(offset):
+                                shifted = values.copy()
+                                shifted[column] += offset * step
+                                return self.makeOscillator(shifted, n).probability(compiled)
+                            numerical = (shiftedProbability(-2) - 8*shiftedProbability(-1)
+                                         + 8*shiftedProbability(1) - shiftedProbability(2)) / (12*step)
                             np.testing.assert_allclose(gradient[:, column], numerical, rtol=3e-5, atol=3e-6)
                     _, subset = osc.probabilityWithGradient(events, [requested[5], requested[0], requested[5]])
                     np.testing.assert_allclose(subset, gradient[:, [5, 0, 5]], atol=1e-12)
@@ -100,3 +105,31 @@ class TestConstantMatterGradient(unittest.TestCase):
         osc.hamiltonian.set_matter_profile(matter.MatterProfile.from_fractions([2.6, 3.], [.5, .5], [.5, .5]))
         with self.assertRaises(NotImplementedError):
             osc.probabilityWithGradient(self.makeEvents(), self.basis)
+
+    def testMatterParameters(self):
+        events = self.makeEvents()
+        requested = [ElectronFraction(), self.basis[2], MatterDensity(), ElectronFraction()]
+        for rho, fraction in [(2.6, .5), (0., .5), (2.6, 0.), (0., 0.)]:
+            osc = self.makeOscillator(self.values)
+            osc.hamiltonian.set_constant_density(rho, fraction)
+            probability, gradient = osc.probability(events, parameterBasis=requested)
+            np.testing.assert_allclose(probability, osc.probability(events), atol=1e-14)
+            np.testing.assert_allclose(gradient[:, 0], gradient[:, 3], atol=1e-14)
+            np.testing.assert_allclose(rho * gradient[:, 2], fraction * gradient[:, 0], atol=1e-13)
+            for column, coordinate in [(0, 1), (2, 0)]:
+                step = 1e-3
+                def shiftedProbability(offset):
+                    density = [rho, fraction]
+                    density[coordinate] += offset * step
+                    other = self.makeOscillator(self.values)
+                    other.hamiltonian.set_constant_density(*density)
+                    return other.probability(events)
+                numerical = (shiftedProbability(-2) - 8*shiftedProbability(-1)
+                             + 8*shiftedProbability(1) - shiftedProbability(2)) / (12*step)
+                np.testing.assert_allclose(gradient[:, column], numerical, rtol=2e-6, atol=1e-9)
+        channels = NeutrinoEventBatch(np.full(6, 295.), np.full(6, .6), np.ones(6, dtype=int),
+                                     np.tile(np.arange(3), 2), np.repeat([False, True], 3))
+        _, gradient = self.makeOscillator(self.values).probability(channels, parameterBasis=requested)
+        np.testing.assert_allclose(gradient.reshape(2, 3, 4).sum(axis=1), 0, atol=1e-13)
+        with self.assertRaises(ValueError):
+            self.makeOscillator(self.values, useVacuum=True).probability(events, parameterBasis=[MatterDensity()])

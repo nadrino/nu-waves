@@ -34,7 +34,7 @@ def makeEvents(n=3):
         isAntiNu=np.repeat([False, True], n * n))
 
 
-def testFiniteDifferences(inverted, n):
+def checkFiniteDifferences(inverted, n):
     parameters = values.copy()
     if inverted:
         parameters[-1] *= -1
@@ -60,7 +60,7 @@ def testFiniteDifferences(inverted, n):
     assert oscillator.probabilityWithGradient(events, [])[1].shape == (2 * n * n, 0)
 
 
-def testConservationAndZeroBaseline():
+def checkConservationAndZeroBaseline():
     oscillator = makeOscillator(values)
     events = NeutrinoEventBatch(np.full(6, 295.), np.full(6, .6),
                                np.ones(6, dtype=int), np.tile(np.arange(3), 2),
@@ -73,7 +73,7 @@ def testConservationAndZeroBaseline():
     np.testing.assert_allclose(oscillator.probabilityWithGradient(zero, basis)[1], 0, atol=1e-14)
 
 
-def testValidation():
+def checkValidation():
     oscillator = makeOscillator(values)
     for parameter in [MixingAngle(1, 4), MassSquaredDifference(3, 1)]:
         with unittest.TestCase().assertRaises(ValueError):
@@ -92,10 +92,10 @@ class TestVacuumGradient(unittest.TestCase):
         for inverted in [False, True]:
             for n in [3, 4]:
                 with self.subTest(inverted=inverted, n=n):
-                    testFiniteDifferences(inverted, n)
+                    checkFiniteDifferences(inverted, n)
 
     def testConservation(self):
-        testConservationAndZeroBaseline()
+        checkConservationAndZeroBaseline()
 
     def testInvalidParameters(self):
-        testValidation()
+        checkValidation()
