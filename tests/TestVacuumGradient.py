@@ -5,7 +5,7 @@ from nu_waves.hamiltonian import vacuum, matter
 from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.propagation.oscillator import Oscillator, NeutrinoEventBatch
-from nu_waves.propagation.Gradient import MixingAngle, DiracPhase, MassSquaredDifference
+from nu_waves.propagation.gradient import MixingAngle, DiracPhase, MassSquaredDifference
 
 
 basis = [MixingAngle(1, 2), MixingAngle(1, 3), MixingAngle(2, 3),
@@ -82,6 +82,7 @@ def testValidation():
         oscillator.probabilityWithGradient(makeEvents(), ['theta_12'])
     oscillator.hamiltonian = matter.Hamiltonian(oscillator.hamiltonian.mixing,
                                               oscillator.hamiltonian.spectrum, False)
+    oscillator.hamiltonian.set_matter_profile(matter.MatterProfile.from_fractions([2.6], [.5], [1.]))
     with unittest.TestCase().assertRaises(NotImplementedError):
         oscillator.probabilityWithGradient(makeEvents(), basis)
 

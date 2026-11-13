@@ -63,19 +63,28 @@ class Oscillator:
         self._executorSignature = None
 
     def probabilityWithGradient(self, events, parameterBasis):
-        """Compute vacuum event probabilities and their physical Jacobian.
+        """Compute vacuum/constant-matter probabilities and their physical Jacobian.
 
         Accepts the same event batches/lists and compiled batches as probability.
         Columns follow parameterBasis, including subsets and repeated entries.
-        This initial gradient path runs on CPU in float64. Matter Hamiltonians
-        are deliberately rejected rather than silently ignoring their potential.
+        This gradient path runs on CPU in float64. Matter density and electron
+        fraction are held fixed; layered matter profiles are not supported.
         """
         from nu_waves.hamiltonian.vacuum import Hamiltonian
-        from nu_waves.propagation.Gradient import vacuumProbabilityWithGradient
+        from nu_waves.hamiltonian.matter import Hamiltonian as MatterHamiltonian
+        from nu_waves.propagation.gradient import (
+            vacuumProbabilityWithGradient, constantMatterProbabilityWithGradient,
+        )
 
-        if type(self.hamiltonian) is not Hamiltonian:
-            raise NotImplementedError("Analytic gradients currently support only the vacuum Hamiltonian.")
-        return vacuumProbabilityWithGradient(
+        if type(self.hamiltonian) is Hamiltonian:
+            evaluate = vacuumProbabilityWithGradient
+        elif type(self.hamiltonian) is MatterHamiltonian:
+            if self.hamiltonian._matter_profile is not None:
+                raise NotImplementedError("Analytic matter gradients require constant density.")
+            evaluate = constantMatterProbabilityWithGradient
+        else:
+            raise NotImplementedError("Analytic gradients support vacuum and constant matter only.")
+        return evaluate(
             self.hamiltonian, self.compileEvents(events), parameterBasis
         )
 
