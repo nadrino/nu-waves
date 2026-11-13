@@ -147,8 +147,12 @@ class LayeredMatterExecutor(ConstantMatterOptimizedExecutor):
         vacuum, tangent = VacuumHamiltonian.vacuumMatrix(*model)
         potentials = None
         if parameterBasis is not None:
+            from nu_waves.propagation.gradient import ProfileParameter
+            profile = self.hamiltonian._matter_profile
+            names = {p.name for p in parameterBasis if isinstance(p, ProfileParameter)}
+            profileGradients = profile.parameterGradients(names) if names else {}
             potentials = [self.hamiltonian.potentialTangents(
-                layer.rho_in_g_per_cm3, layer.Ye, parameterBasis, index)
+                layer.rho_in_g_per_cm3, layer.Ye, parameterBasis, index, profileGradients)
                 for index, layer in enumerate(self.hamiltonian._matter_profile.layers)]
         return vacuum, tangent, potentials
 
@@ -235,9 +239,9 @@ class Hamiltonian(HamiltonianBase):
 
         return S
 
-    def potentialTangents(self, rho, fraction, parameterBasis, layerIndex=None):
+    def potentialTangents(self, rho, fraction, parameterBasis, layerIndex=None, profileGradients=None):
         """Neutrino potential derivatives for a constant medium or one layer."""
-        from nu_waves.propagation.gradient import MatterDensity, ElectronFraction
+        from nu_waves.propagation.gradient import MatterDensity, ElectronFraction, ProfileParameter
         xp = Backend.xp()
         tangents = xp.zeros((len(parameterBasis), self.n_neutrinos, self.n_neutrinos),
                             dtype=Backend.complex_dtype())
@@ -245,6 +249,9 @@ class Hamiltonian(HamiltonianBase):
             if isinstance(parameter, (MatterDensity, ElectronFraction)) and parameter.layerIndex == layerIndex:
                 value = fraction if isinstance(parameter, MatterDensity) else rho
                 tangents[column, 0, 0] = VCOEFF_EV * value
+            elif isinstance(parameter, ProfileParameter):
+                dRho, dYe = profileGradients[parameter.name]
+                tangents[column, 0, 0] = VCOEFF_EV * (fraction * dRho[layerIndex] + rho * dYe[layerIndex])
         return tangents
 
     def profileEvolution(self, length, inv2Energy, vacuum, antineutrino=False,

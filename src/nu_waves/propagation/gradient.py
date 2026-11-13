@@ -36,6 +36,12 @@ class ElectronFraction:
     layerIndex: int | None = None
 
 
+@dataclass(frozen=True)
+class ProfileParameter:
+    """Named physical parameter of a sampled, parameterized matter profile."""
+    name: str
+
+
 def buildMixingGradient(mixing, parameterBasis):
     """Compatibility wrapper around the model's common rotation product."""
     return mixing.build_mixing_matrix(parameterBasis=parameterBasis)
@@ -79,6 +85,11 @@ def validateParameterBasis(hamiltonian, parameterBasis):
     """Validate ordered physical parameter references against the model."""
     mixing, spectrum = hamiltonian.mixing, hamiltonian.spectrum
     for p in parameterBasis:
+        if type(p) is ProfileParameter:
+            profile = getattr(hamiltonian, "_matter_profile", None)
+            if not hasattr(profile, "parameters") or p.name not in profile.parameters:
+                raise ValueError(f"Unknown profile parameter: {p.name!r}")
+            continue
         if type(p) in (MatterDensity, ElectronFraction):
             from nu_waves.hamiltonian.matter import Hamiltonian
             if not isinstance(hamiltonian, Hamiltonian):
