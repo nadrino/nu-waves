@@ -43,9 +43,7 @@ def run(command):
                                     inputs['flavorDetect'], inputs['isAntiNu'])
         print(f"nu-waves PythonWorker: device={command['bufferDevice']}, "
               f"dtype={command['weights'].dtype}", file=sys.stderr, flush=True)
-        # GUNDAM currently exports gradients on host only. nu-waves also supports
-        # device Jacobians, ready for a future device gradient transport.
-        return {'status': 'ok', 'supportsGradient': command['bufferDevice'] == 'cpu'}
+        return {'status': 'ok', 'supportsGradient': True}
     if action == 'evaluate':
         oscillator = makeOscillator(command['parameterBuffer'])
         withGradient = command.get('withGradient', False)

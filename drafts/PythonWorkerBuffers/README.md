@@ -52,10 +52,10 @@ It writes physical derivatives dP/dp in the requested basis order, on the same
 device and in the same real dtype as the weights. If the gradient buffer is
 omitted, nu-waves allocates a Jacobian on that same device.
 
-GUNDAM currently transports gradients on host only. The example advertises
-`supportsGradient` on CPU, handles `withGradient`, and acknowledges
-`gradientGeneration`. Once GUNDAM exports device gradients, the same call can
-use them; update that capability declaration when the transport is available.
+GUNDAM supports host and MPS gradient buffers. The example advertises
+`supportsGradient`, handles `withGradient`, and acknowledges `gradientGeneration`.
+The worker writes directly into the supplied gradient buffer. GUNDAM currently
+reads device gradients back to its dense host table for gradient consumers.
 The runner verifies weights; device gradients are covered separately by
 `tests/TestProbabilityBuffers.py`.
 
