@@ -8,7 +8,6 @@ class TorchBackend:
         self.linalg = self._make_linalg_namespace()
         self._device = device or self.xp.device("cpu")
 
-        print("[Torch] Using device:", self._device)
         # faster?
         # self.xp.autograd.grad_mode.inference_mode(mode=False)
         pass

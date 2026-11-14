@@ -92,19 +92,23 @@ class Hamiltonian(HamiltonianBase):
         return Backend.xp().exp(-0.5j * (length / energy)[:, None] * masses[None, :])
 
     @staticmethod
-    def vacuumAmplitude(length, energy, matrix, masses, emit, detect, dMatrix=None, dMasses=None):
+    def vacuumAmplitude(length, energy, matrix, masses, emit, detect, dMatrix=None, dMasses=None, isAntiNu=None):
         """Evaluate a flavor amplitude and optional parameter tangents."""
         xp = Backend.xp()
         phases = Hamiltonian.vacuumPhases(length, energy, masses)
         coefficients = xp.conjugate(matrix[emit]) * matrix[detect]
-        amplitude = xp.sum(phases * coefficients[None, :], axis=1)
+        if isAntiNu is not None:
+            coefficients = xp.where(isAntiNu[:, None], xp.conjugate(coefficients), coefficients)
+        amplitude = xp.sum(phases * coefficients, axis=1)
         if dMatrix is None:
             return amplitude, None
         tangents = []
         for column in range(dMatrix.shape[0]):
             dc = xp.conjugate(dMatrix[column, emit]) * matrix[detect] + xp.conjugate(matrix[emit]) * dMatrix[column, detect]
-            tangent = xp.sum(phases * dc[None, :], axis=1)
-            tangent = tangent - 0.5j * (length / energy) * xp.sum(phases * (coefficients * dMasses[column])[None, :], axis=1)
+            if isAntiNu is not None:
+                dc = xp.where(isAntiNu[:, None], xp.conjugate(dc), dc)
+            tangent = xp.sum(phases * dc, axis=1)
+            tangent = tangent - 0.5j * (length / energy) * xp.sum(phases * (coefficients * dMasses[column]), axis=1)
             tangents.append(tangent)
         return amplitude, tangents
 

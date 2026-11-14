@@ -107,6 +107,59 @@ plt.show()
 ```
 
 
+### Caller-owned probability and gradient buffers
+
+`Oscillator.probability(events, outputBuffer=weights)` writes into an existing
+NumPy array or Torch tensor of shape `(N,)` and returns that same object.
+The output selects the backend, device and real precision for this call,
+independently of the global `Backend`. Without `outputBuffer`, the existing API
+continues to return CPU results.
+
+```python
+from nu_waves.propagation.oscillator import NeutrinoEventBatch
+from nu_waves.propagation.gradient import MixingAngle, DiracPhase
+
+# All arrays below are existing buffers supplied by the caller.
+events = NeutrinoEventBatch(length, energy, emit, detect, anti)
+osc.probability(events, outputBuffer=weights)
+
+probabilities, jacobian = osc.probability(
+    events,
+    outputBuffer=weights,
+    parameterBasis=[MixingAngle(2, 3), DiracPhase(1, 3)],
+    gradientOutputBuffer=gradients,  # shape (N, 2), physical dP/dp
+)
+assert probabilities is weights and jacobian is gradients
+```
+
+Omit `gradientOutputBuffer` to allocate the Jacobian on the output's device.
+All event arrays and gradient storage must share the output's array library and
+device; lengths, energies and gradients also share its float32/float64 dtype.
+MPS uses float32. Flavor codes are zero-based integers (electron=0, muon=1,
+tau=2), optionally stored as floats; `isAntiNu > 0.5` selects antineutrinos.
+Category conversions and intermediate allocations stay on the device.
+
+Model parameters can be Python constants or scalar array/tensor views on that
+same device. To follow a mutable parameter buffer in both NumPy and Torch, use
+`parameters[i:i+1].reshape(())`; NumPy integer indexing would copy a scalar.
+Buffer evaluation rebuilds model values from those views on every call.
+
+This mode accepts `NeutrinoEventBatch` directly, bypassing CPU event grouping;
+`CompiledEventBatch` is not accepted. Validate finite values, positive energies
+and flavor bounds before calling: evaluation checks metadata only, without
+scalar device reads or host synchronization. Inputs, weights and gradients
+must have disjoint storage. The caller owns buffer lifetimes and queue/stream
+synchronization. Torch autograd is disabled; gradients are analytic derivatives
+in the requested `parameterBasis` order.
+
+Vacuum weights and gradients support NumPy and Torch CPU/MPS/CUDA. Matter uses
+the existing executors on NumPy and Torch CPU/CUDA; MPS is explicitly rejected
+because its eigendecomposition currently falls back to CPU. CUDA requires
+hardware validation. Tests cover ownership, parameter updates, strided output
+views and host-read guards in `tests/TestProbabilityBuffers.py`. The runtime
+GUNDAM example and production-worker migration notes are in
+[`drafts/PythonWorkerBuffers`](drafts/PythonWorkerBuffers/README.md).
+
 ### Analytic probability gradients
 
 Vacuum, constant-density and layered matter Hamiltonians support physical parameter

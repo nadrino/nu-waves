@@ -1,2 +1,7 @@
 .venv
 .idea
+
+# cache folders
+examples/data
+notebooks/.cache
+__pycache__

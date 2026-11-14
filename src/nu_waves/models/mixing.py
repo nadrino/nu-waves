@@ -44,12 +44,17 @@ class Mixing:
         # complex_type = np.complex128
         # real_type = np.float64
 
-        # Small model matrices are assembled on CPU once, then transferred.
+        if Backend._bufferContext.get() is not None:
+            xp = Backend.xp()
+            complex_type = Backend.complex_dtype()
+            real_type = Backend.real_dtype()
+
+        # Buffer evaluation assembles model matrices on the output device.
         # The rotation product is identical with and without derivatives.
         if parameterBasis is not None:
             from nu_waves.propagation.gradient import MixingAngle, DiracPhase
             parameterBasis = tuple(parameterBasis)
-            derivatives = np.zeros((len(parameterBasis), self.n_neutrinos, self.n_neutrinos), dtype=complex_type)
+            derivatives = xp.zeros((len(parameterBasis), self.n_neutrinos, self.n_neutrinos), dtype=complex_type)
         U = xp.eye(self.n_neutrinos, dtype=complex_type)
 
         # Build the ordered list of rotation pairs to apply (right-multiplication)
@@ -83,7 +88,7 @@ class Mixing:
                 for column, parameter in enumerate(parameterBasis):
                     if not isinstance(parameter, (MixingAngle, DiracPhase)) or (parameter.i, parameter.j) != (i, j):
                         continue
-                    tangent = np.zeros_like(R)
+                    tangent = xp.zeros_like(R)
                     if isinstance(parameter, MixingAngle):
                         tangent[ii, ii] = tangent[jj, jj] = -s
                         tangent[ii, jj] = c * xp.exp(-1j * delta)

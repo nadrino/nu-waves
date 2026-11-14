@@ -54,17 +54,20 @@ def buildSpectrumGradient(spectrum, parameterBasis):
     A common mass offset is omitted because it cancels in probabilities.
     """
     n = spectrum.n_neutrinos
+    xp = Backend.xp()
     adjacency = [[] for _ in range(n)]
     for pair, value in (spectrum._dm2_dict or {}).items():
         if value is None:
             continue
         i, j = pair[0] - 1, pair[1] - 1
-        tangent = np.array([float(isinstance(p, MassSquaredDifference) and
-                                  (p.i, p.j) == pair) for p in parameterBasis])
+        tangent = xp.zeros((len(parameterBasis),), dtype=Backend.real_dtype())
+        for column, p in enumerate(parameterBasis):
+            tangent[column] = float(isinstance(p, MassSquaredDifference) and (p.i, p.j) == pair)
+        value = xp.asarray(value, dtype=Backend.real_dtype())
         adjacency[j].append((i, value, tangent))
         adjacency[i].append((j, -value, -tangent))
-    masses = np.zeros(n)
-    derivatives = np.zeros((len(parameterBasis), n))
+    masses = xp.zeros((n,), dtype=Backend.real_dtype())
+    derivatives = xp.zeros((len(parameterBasis), n), dtype=Backend.real_dtype())
     visited = {0}
     queue = [0]
     for j in queue:

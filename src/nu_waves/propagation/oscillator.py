@@ -62,7 +62,7 @@ class Oscillator:
         self._executor = None
         self._executorSignature = None
 
-    def probabilityWithGradient(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None, *, parameterBasis=None):
+    def probabilityWithGradient(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None, *, parameterBasis=None, outputBuffer=None, gradientOutputBuffer=None):
         """Compatibility wrapper for probability(..., parameterBasis=basis).
 
         The former positional (events, basis) form is also accepted.
@@ -71,14 +71,29 @@ class Oscillator:
             parameterBasis, E_GeV = E_GeV, None
         if parameterBasis is None:
             raise TypeError("A parameterBasis is required for gradient evaluation.")
-        return self.probability(L_km, E_GeV, flavor_emit, flavor_det, parameterBasis=parameterBasis)
+        return self.probability(L_km, E_GeV, flavor_emit, flavor_det, parameterBasis=parameterBasis,
+                                outputBuffer=outputBuffer, gradientOutputBuffer=gradientOutputBuffer)
 
-    def probability(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None, *, parameterBasis=None):
+    def probability(self, L_km, E_GeV=None, flavor_emit=None, flavor_det=None, *, parameterBasis=None, outputBuffer=None, gradientOutputBuffer=None):
         """Return probabilities, or (probabilities, Jacobian) when a basis is given.
 
         Jacobian axes append parameterBasis order to the probability shape.
         Model preparation and propagation use the same backend for both paths.
+
+        With outputBuffer, events must be a NeutrinoEventBatch. Its arrays and
+        optional gradientOutputBuffer remain on the output's backend/device.
+        Returns the supplied output (and a Jacobian when parameterBasis is set).
+        Caller-owned inputs must not overlap outputs; validate finite values,
+        positive energies and flavor bounds before calling. No value validation
+        or host synchronization is performed in this mode.
         """
+        if outputBuffer is not None:
+            if not isinstance(L_km, NeutrinoEventBatch) or any(value is not None for value in (E_GeV, flavor_emit, flavor_det)):
+                raise TypeError("outputBuffer requires a NeutrinoEventBatch as the sole positional argument.")
+            from nu_waves.propagation.BufferProbability import evaluateBuffers
+            return evaluateBuffers(self, L_km, outputBuffer, parameterBasis, gradientOutputBuffer)
+        if gradientOutputBuffer is not None:
+            raise ValueError("gradientOutputBuffer requires outputBuffer.")
         if parameterBasis is not None:
             basis = tuple(parameterBasis)
             if isinstance(L_km, CompiledEventBatch) or self._is_event_arg(L_km):

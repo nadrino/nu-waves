@@ -1,4 +1,5 @@
 from nu_waves.globals.backend import Backend
+import numpy as np
 
 
 class Spectrum:
@@ -42,12 +43,50 @@ class Spectrum:
         self._generate_dm2_matrix()
 
     # ---------- Input of Δm² ----------
+    def relativeMasses(self):
+        """Resolve graph-connected mass differences without reading array values."""
+        xp = Backend.xp()
+        n = self.n_neutrinos
+        adjacency = [[] for _ in range(n)]
+        seen = set()
+        for (i, j), value in (self._dm2_dict or {}).items():
+            if value is None:
+                continue
+            if not (1 <= i <= n and 1 <= j <= n) or i == j:
+                raise ValueError("Invalid mass-difference indices.")
+            if (j, i) in seen:
+                raise ValueError("Redundant mass differences.")
+            seen.add((i, j))
+            value = xp.asarray(value, dtype=Backend.real_dtype())
+            adjacency[j - 1].append((i - 1, value))
+            adjacency[i - 1].append((j - 1, -value))
+        if len(seen) > n - 1:
+            raise ValueError("Too many independent mass differences.")
+        values = {0: xp.asarray(0., dtype=Backend.real_dtype())}
+        queue = [0]
+        for j in queue:
+            for i, value in adjacency[j]:
+                if i not in values:
+                    values[i] = values[j] + value
+                    queue.append(i)
+        if len(values) != n:
+            raise ValueError("Mass differences must connect all mass states.")
+        return xp.stack([values[i] for i in range(n)])
+
     def _generate_dm2_matrix(self):
         """
         Set Δm²_ij values, checking for consistency and redundancy.
         Example:
             spec.set_dm2({(2,1): 7.4e-5, (3,1): 2.517e-3})
         """
+        # Mutable parameter views use graph topology, never scalar value reads.
+        arrays = [value for value in (self._dm2_dict or {}).values()
+                  if isinstance(value, np.ndarray) or type(value).__module__.startswith("torch")]
+        if arrays:
+            with Backend.useBuffer(arrays[0]):
+                masses = self.relativeMasses()
+                self._dm2_matrix = masses[:, None] - masses[None, :]
+            return
         # init
         self._dm2_matrix = Backend.xp().zeros((self._n_neutrinos, self._n_neutrinos), dtype=Backend.real_dtype())
         self._dm2_matrix = Backend.to_device(self._dm2_matrix)
@@ -93,7 +132,6 @@ class Spectrum:
           - Missing entries are inferred from transitivity.
           - Slight inconsistencies are corrected (auto-heal).
         """
-        import numpy as np
         xp = np
         # xp = Backend.xp()
 

@@ -1,0 +1,59 @@
+# Real GUNDAM configuration; Run.py supplies runtime paths and selects the backend.
+fitterEngineConfig:
+  enablePca: false
+  scaleParStepWithChi2Response: false
+  generateSamplePlots: false
+  generateOneSigmaPlots: false
+  likelihoodInterfaceConfig:
+    jointProbabilityConfig:
+      type: LeastSquares
+      lsqPoissonianApproximation: true
+    backendManagerConfig:
+      isEnabled: true
+      type: MPS
+    dataSetList:
+      - name: BufferSample
+        isEnabled: true
+        model:
+          tree: tree_mc
+          nominalWeightFormula: "1.0"
+          filePathList: [Events.root]
+    propagatorConfig:
+      sampleSetConfig:
+        sampleList:
+          - name: Energy
+            isEnabled: true
+            dataSets: [BufferSample]
+            binning:
+              binningDefinition:
+                - name: E
+                  edges: [0.0, 1.0, 6.0]
+      parametersManagerConfig:
+        parameterSetList:
+          - name: PMNS
+            isEnabled: true
+            nominalStepSize: 0.01
+            parameterDefinitions:
+              - {name: theta_12, priorValue: 0.59, priorType: Flat}
+              - {name: theta_13, priorValue: 0.15, priorType: Flat}
+              - {name: theta_23, priorValue: 0.81, priorType: Flat}
+              - {name: delta_cp, priorValue: -1.6, priorType: Flat}
+              - {name: delta_m2_21, priorValue: 0.000075, priorType: Flat}
+              - {name: delta_m2_32, priorValue: 0.0025, priorType: Flat}
+            dialSetDefinitions:
+              - dialType: ExternalWeight
+                applyOnDataSets: [BufferSample]
+                dialInputList:
+                  - {name: theta_12}
+                  - {name: theta_13}
+                  - {name: theta_23}
+                  - {name: delta_cp}
+                  - {name: delta_m2_21}
+                  - {name: delta_m2_32}
+                options:
+                  type: PythonWorker
+                  inputEventVarList: ["[L]", "[E]", "[flavorEmit]", "[flavorDetect]", "[isAntiNu]"]
+                  workerConfig:
+                    pythonExecutable: ./WorkerPython
+                    evalScript: ./Reweight.py
+                    backendBufferMemoryLocation: onDevice
