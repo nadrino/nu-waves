@@ -57,6 +57,13 @@ class Spectrum:
             if (j, i) in seen:
                 raise ValueError("Redundant mass differences.")
             seen.add((i, j))
+            context = Backend._bufferContext.get()
+            if context is not None:
+                if isinstance(value, np.ndarray) and context._api_name != 'numpy':
+                    raise ValueError('Mass-difference arrays must share the same backend/device; found a host NumPy array.')
+                if type(value).__module__.startswith('torch'):
+                    if context._api_name != 'torch' or value.device != xp.device:
+                        raise ValueError('Mass-difference tensors must share the same device.')
             value = xp.asarray(value, dtype=Backend.real_dtype())
             adjacency[j - 1].append((i - 1, value))
             adjacency[i - 1].append((j - 1, -value))

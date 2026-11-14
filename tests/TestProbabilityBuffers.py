@@ -31,6 +31,57 @@ def makeOscillator(values, withMatter=False):
 
 
 class TestProbabilityBuffers(unittest.TestCase):
+    def checkDevicePolicy(self, device):
+        import torch
+        Backend.set_api(np)
+        dtype = torch.float32 if device == 'mps' else torch.float64
+        energy = torch.linspace(.3, 3., 9, device=device, dtype=dtype)
+        # Constant baseline, channel, CP flag and model parameters are context.
+        events = NeutrinoEventBatch(295., energy, 1, 0, False)
+        oscillator = makeOscillator(VALUES)
+        referenceEvents = NeutrinoEventBatch(np.full(9, 295.), energy.cpu().numpy(),
+                                             np.ones(9, dtype=int), np.zeros(9, dtype=int))
+        expected, expectedGradient = oscillator.probability(referenceEvents, parameterBasis=BASIS)
+        with patch.object(Backend, 'from_device', side_effect=AssertionError('Host read')), \
+             patch.object(torch.Tensor, 'cpu', side_effect=AssertionError('Host read')), \
+             patch.object(torch.Tensor, 'item', side_effect=AssertionError('Scalar read')):
+            output, gradients = oscillator.probability(events, parameterBasis=BASIS)
+            weights = oscillator.probability(events)
+            suppliedGradient = torch.empty_like(gradients)
+            _, returnedGradient = oscillator.probability(events, parameterBasis=BASIS,
+                                                         gradientOutputBuffer=suppliedGradient)
+            positional, positionalGradient = oscillator.probability(295., energy, 1, 0, parameterBasis=BASIS)
+            channels = oscillator.probability(295., energy, [0, 1], None)
+        self.assertIs(returnedGradient, suppliedGradient)
+        for value in (output, gradients, weights, positional, positionalGradient, channels):
+            self.assertEqual(value.device, energy.device)
+        self.assertEqual(channels.shape, (9, 2, 3))
+        np.testing.assert_allclose(output.cpu().numpy(), expected, atol=3e-5, rtol=0)
+        np.testing.assert_allclose(positional.cpu().numpy(), expected, atol=3e-5, rtol=0)
+        np.testing.assert_allclose(gradients.cpu().numpy(), expectedGradient, atol=.04, rtol=1e-4)
+        np.testing.assert_allclose(positionalGradient.cpu().numpy(), expectedGradient, atol=.04, rtol=1e-4)
+        self.assertIs(Backend.xp(), np)
+        # Host arrays and even CPU scalar tensors remain data, not constants.
+        for hostValue in (np.full(9, 295.), torch.full((9,), 295.), torch.tensor(295.)):
+            with self.assertRaisesRegex((ValueError, TypeError), 'L_km'):
+                oscillator.probability(NeutrinoEventBatch(hostValue, energy, 1, 0))
+            with self.assertRaisesRegex(ValueError, 'L_km'):
+                oscillator.probability(hostValue, energy, 1, 0)
+        with self.assertRaises((ValueError, TypeError)):
+            oscillator.probability(events, outputBuffer=np.empty(9))
+        with self.assertRaises((ValueError, TypeError)):
+            oscillator.probability(events, parameterBasis=BASIS, gradientOutputBuffer=np.empty((9, 6)))
+        oscillator.hamiltonian.mixing.mixing_angles[(1, 2)] = np.array(.59)
+        with self.assertRaisesRegex(ValueError, 'model parameter'):
+            oscillator.probability(events)
+        with self.assertRaisesRegex(ValueError, 'host storage'):
+            makeOscillator(VALUES).compileEvents(events)
+        # A device parameter with host events must also trigger the policy.
+        oscillator = makeOscillator(VALUES)
+        oscillator.hamiltonian.mixing.mixing_angles[(1, 2)] = energy[0]
+        with self.assertRaisesRegex(ValueError, 'L_km'):
+            oscillator.probability(referenceEvents)
+
     def checkBuffers(self, device=None, withMatter=False, count=109):
         Backend.set_api(np)
         index = np.arange(count)
@@ -106,6 +157,7 @@ class TestProbabilityBuffers(unittest.TestCase):
         if not torch.backends.mps.is_available():
             self.skipTest('MPS unavailable')
         self.checkBuffers('mps', count=65539)
+        self.checkDevicePolicy('mps')
 
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
     def testCuda(self):
@@ -113,6 +165,7 @@ class TestProbabilityBuffers(unittest.TestCase):
         if not torch.cuda.is_available():
             self.skipTest('CUDA unavailable')
         self.checkBuffers('cuda')
+        self.checkDevicePolicy('cuda')
 
     def testInvalidBuffers(self):
         oscillator = makeOscillator(VALUES)

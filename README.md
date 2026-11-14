@@ -111,9 +111,11 @@ plt.show()
 
 `Oscillator.probability(events, outputBuffer=weights)` writes into an existing
 NumPy array or Torch tensor of shape `(N,)` and returns that same object.
-The output selects the backend, device and real precision for this call,
-independently of the global `Backend`. Without `outputBuffer`, the existing API
-continues to return CPU results.
+Device array inputs select execution on their device, independently of the
+global `Backend`. Without `outputBuffer`, probabilities and Jacobians are
+allocated on that same device. Host-only calls retain the existing CPU-returning
+API. An explicit output buffer must match the input device; it cannot request
+an implicit host/device transfer.
 
 ```python
 from nu_waves.propagation.oscillator import NeutrinoEventBatch
@@ -121,6 +123,8 @@ from nu_waves.propagation.gradient import MixingAngle, DiracPhase
 
 # All arrays below are existing buffers supplied by the caller.
 events = NeutrinoEventBatch(length, energy, emit, detect, anti)
+# If these arrays are on MPS/CUDA, the result stays there automatically.
+probabilities = osc.probability(events)
 osc.probability(events, outputBuffer=weights)
 
 probabilities, jacobian = osc.probability(
@@ -133,19 +137,26 @@ assert probabilities is weights and jacobian is gradients
 ```
 
 Omit `gradientOutputBuffer` to allocate the Jacobian on the output's device.
-All event arrays and gradient storage must share the output's array library and
+All event arrays and gradient storage must share the same array library and
 device; lengths, energies and gradients also share its float32/float64 dtype.
 MPS uses float32. Flavor codes are zero-based integers (electron=0, muon=1,
 tau=2), optionally stored as floats; `isAntiNu > 0.5` selects antineutrinos.
 Category conversions and intermediate allocations stay on the device.
 
-Model parameters can be Python constants or scalar array/tensor views on that
-same device. To follow a mutable parameter buffer in both NumPy and Torch, use
+Python numeric constants and NumPy numeric scalars are allowed for fixed model
+parameters, baselines, channels and CP flags. They are expanded on the device.
+Host arrays and CPU tensors (including zero-dimensional tensors) are data, not
+context: mixing them with GPU inputs raises an error naming the offending input.
+Scalar array/tensor parameter views must also share the event device.
+To follow a mutable parameter buffer in both NumPy and Torch, use
 `parameters[i:i+1].reshape(())`; NumPy integer indexing would copy a scalar.
 Buffer evaluation rebuilds model values from those views on every call.
 
-This mode accepts `NeutrinoEventBatch` directly, bypassing CPU event grouping;
-`CompiledEventBatch` is not accepted. Validate finite values, positive energies
+This mode accepts `NeutrinoEventBatch` directly, bypassing CPU event grouping.
+Device inputs also work with the positional `probability(L_km, E_GeV, ...)`
+API, retaining its energy/channel axes and squeezing rules. Explicit output
+buffers currently require `NeutrinoEventBatch`. `compileEvents()` rejects device
+inputs rather than copying them to host. Validate finite values, positive energies
 and flavor bounds before calling: evaluation checks metadata only, without
 scalar device reads or host synchronization. Inputs, weights and gradients
 must have disjoint storage. The caller owns buffer lifetimes and queue/stream

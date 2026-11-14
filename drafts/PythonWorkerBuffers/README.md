@@ -38,6 +38,12 @@ as `parameterBuffer[i:i+1].reshape(())` to retain a view on both NumPy and Torch
 An integer index into a NumPy array would instead copy a scalar. No explicit
 nu-waves backend selection is required: the output buffer selects it locally.
 
+Device inputs also keep results on their device when no output buffer is
+supplied, including analytic gradients. Providing GUNDAM's output buffers still
+avoids allocating a separate result. Mixing host arrays/CPU tensors and GPU
+arrays is an error. Python numeric constants (for example a fixed baseline or
+mixing angle) are permitted; zero-dimensional CPU tensors remain host data.
+
 ## Gradients
 
 nu-waves accepts `parameterBasis=BASIS` and

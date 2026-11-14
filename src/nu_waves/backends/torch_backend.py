@@ -96,6 +96,9 @@ class TorchBackend:
             device = self.device
         return self.xp.zeros(shape, device=device, dtype=dtype)
 
+    def full(self, shape, fill_value, dtype=None, device=None):
+        return self.xp.full(shape, fill_value, device=self.device if device is None else device, dtype=dtype)
+
     def conjugate(self, x):
         return self.xp.conj(x)
 

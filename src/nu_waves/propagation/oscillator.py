@@ -80,20 +80,32 @@ class Oscillator:
         Jacobian axes append parameterBasis order to the probability shape.
         Model preparation and propagation use the same backend for both paths.
 
+        Device input arrays keep probabilities and Jacobians on their device,
+        even without outputBuffer. Mixing host/device arrays is an error;
+        Python scalar constants are permitted for fixed runtime context.
         With outputBuffer, events must be a NeutrinoEventBatch. Its arrays and
-        optional gradientOutputBuffer remain on the output's backend/device.
+        optional gradientOutputBuffer remain on the same backend/device.
         Returns the supplied output (and a Jacobian when parameterBasis is set).
         Caller-owned inputs must not overlap outputs; validate finite values,
         positive energies and flavor bounds before calling. No value validation
         or host synchronization is performed in this mode.
         """
-        if outputBuffer is not None:
+        from nu_waves.propagation.BufferProbability import findDeviceInput, evaluateBuffers
+        deviceInput = findDeviceInput(self, L_km, E_GeV, flavor_emit, flavor_det)
+        if outputBuffer is not None or (isinstance(L_km, NeutrinoEventBatch) and deviceInput is not None):
             if not isinstance(L_km, NeutrinoEventBatch) or any(value is not None for value in (E_GeV, flavor_emit, flavor_det)):
                 raise TypeError("outputBuffer requires a NeutrinoEventBatch as the sole positional argument.")
-            from nu_waves.propagation.BufferProbability import evaluateBuffers
             return evaluateBuffers(self, L_km, outputBuffer, parameterBasis, gradientOutputBuffer)
         if gradientOutputBuffer is not None:
-            raise ValueError("gradientOutputBuffer requires outputBuffer.")
+            raise ValueError("gradientOutputBuffer requires outputBuffer or a device NeutrinoEventBatch.")
+        if deviceInput is not None:
+            if isinstance(L_km, CompiledEventBatch) or self._is_event_arg(L_km):
+                raise TypeError('Device propagation requires a NeutrinoEventBatch, not CPU-compiled events or an event list.')
+            if E_GeV is None:
+                raise TypeError("Oscillator.probability() missing required argument: 'E_GeV'")
+            from nu_waves.propagation.BufferProbability import evaluateDeviceArguments
+            basis = None if parameterBasis is None else tuple(parameterBasis)
+            return evaluateDeviceArguments(self, L_km, E_GeV, flavor_emit, flavor_det, deviceInput, basis)
         if parameterBasis is not None:
             basis = tuple(parameterBasis)
             if isinstance(L_km, CompiledEventBatch) or self._is_event_arg(L_km):
@@ -258,6 +270,9 @@ class Oscillator:
             return events
 
         batch = self._coerce_event_batch(events)
+        from nu_waves.propagation.BufferProbability import findDeviceInput
+        if findDeviceInput(self, batch) is not None:
+            raise ValueError('compileEvents uses host storage; pass device events directly to probability().')
 
         L = np.asarray(batch.L_km, dtype=float).reshape(-1)
         E = np.asarray(batch.E_GeV, dtype=float).reshape(-1)
