@@ -199,18 +199,3 @@ probabilities, gradients = osc.probability(
 )
 ```
 
-Value callbacks return a scalar or one value per layer. Analytic gradient
-callbacks return dictionaries of derivatives with the same shapes. An omitted
-key contributes zero, but every requested profile parameter must appear in at
-least one gradient dictionary. Missing derivatives are rejected rather than
-silently approximated. Callbacks run on CPU for profile metadata; propagation
-and tangents use the selected backend. Gradient callbacks are not evaluated
-for probability-only calls.
-
-A profile is a sampled snapshot: rebuild it when its physical parameters change.
-Layer boundaries remain fixed. Global parameter derivatives use the chain rule
-inside each layer's potential, without constructing an event Jacobian with one
-column per layer. The returned gradient is that of the discretized profile;
-check both probability and gradient convergence by refining the grid.
-`notebooks/06_gradient.ipynb` includes scans, finite-difference checks, the local
-to global chain rule, and a grid convergence plot.
