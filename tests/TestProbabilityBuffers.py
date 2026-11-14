@@ -160,6 +160,17 @@ class TestProbabilityBuffers(unittest.TestCase):
         self.checkDevicePolicy('mps')
 
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
+    def testMpsMatter(self):
+        import torch
+        if not torch.backends.mps.is_available():
+            self.skipTest('MPS unavailable')
+        self.checkBuffers('mps', withMatter=True, count=9)
+        events = NeutrinoEventBatch(295., torch.tensor([.6, .8], device='mps'), 1, 0)
+        weights, gradients = makeOscillator(VALUES, withMatter=True).probability(events, parameterBasis=BASIS)
+        self.assertEqual(weights.device.type, 'mps')
+        self.assertEqual(gradients.device.type, 'mps')
+
+    @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
     def testCuda(self):
         import torch
         if not torch.cuda.is_available():

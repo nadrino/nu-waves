@@ -80,7 +80,7 @@ must be bypassed when using caller-owned buffers:
   existing `withGradient` and generation acknowledgement protocol.
 
 The default production setup uses vacuum propagation, which is supported on
-MPS. Matter buffer evaluation currently supports NumPy and Torch CPU/CUDA;
-MPS raises an explicit error because its eigensolver otherwise falls back to
-CPU. CUDA execution is implemented through Torch but requires validation on
+MPS. Matter buffer evaluation also supports MPS: eigendecomposition temporarily
+transfers matrices to CPU and its results back to MPS. Final probability and
+gradient buffers stay on MPS. CUDA execution is implemented through Torch but requires validation on
 CUDA hardware and a future GUNDAM CUDA buffer transport.

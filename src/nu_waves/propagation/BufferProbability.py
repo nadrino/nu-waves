@@ -79,13 +79,15 @@ def evaluateDeviceArguments(oscillator, length, energy, emit, detect, reference,
 
 
 def evaluateBuffers(oscillator, events, output, parameterBasis, gradientOutput):
-    """Evaluate without scalar device reads, host copies or global backend changes.
+    """Evaluate in caller-owned storage without global backend changes.
 
     Output shape is (N,); Jacobian shape is (N, len(parameterBasis)). Input
     categories may use floating storage (as in GUNDAM); flavors must contain
     exact zero-based integers and isAntiNu uses the threshold 0.5. The caller
     validates values and guarantees disjoint input/output storage and lifetime.
     Intermediate allocations and device-to-device copies are permitted.
+    MPS matter eigendecomposition uses the backend's CPU fallback, returning
+    its results to MPS before continuing. Final outputs stay on their device.
     """
     from nu_waves.hamiltonian.vacuum import Hamiltonian as VacuumHamiltonian
     from nu_waves.hamiltonian.matter import Hamiltonian as MatterHamiltonian
@@ -166,9 +168,6 @@ def evaluateBuffers(oscillator, events, output, parameterBasis, gradientOutput):
     matter = isinstance(hamiltonian, MatterHamiltonian)
     if not matter and type(hamiltonian) is not VacuumHamiltonian:
         raise NotImplementedError("Buffer evaluation supports vacuum and matter Hamiltonians.")
-    if matter and device is not None and device.type == "mps":
-        raise NotImplementedError("Matter buffer evaluation on MPS requires a device-native eigensolver; CPU fallback is disabled.")
-
     with guard, Backend.useBuffer(output):
         xp = Backend.xp()
         # Python/NumPy scalar constants are runtime context, not host data arrays.

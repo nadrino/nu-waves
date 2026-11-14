@@ -164,8 +164,9 @@ synchronization. Torch autograd is disabled; gradients are analytic derivatives
 in the requested `parameterBasis` order.
 
 Vacuum weights and gradients support NumPy and Torch CPU/MPS/CUDA. Matter uses
-the existing executors on NumPy and Torch CPU/CUDA; MPS is explicitly rejected
-because its eigendecomposition currently falls back to CPU. CUDA requires
+the existing executors on NumPy and Torch CPU/MPS/CUDA. MPS transfers matrices
+to CPU for eigendecomposition, then returns eigenvalues and eigenvectors to MPS;
+final probabilities and Jacobians stay on MPS. CUDA requires
 hardware validation. Tests cover ownership, parameter updates, strided output
 views and host-read guards in `tests/TestProbabilityBuffers.py`. The runtime
 GUNDAM example and production-worker migration notes are in
