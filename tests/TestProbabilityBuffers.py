@@ -141,7 +141,7 @@ class TestProbabilityBuffers(unittest.TestCase):
         self.checkBuffers()
 
     def testNumpyMatter(self):
-        self.checkBuffers(withMatter=True, count=9)
+        self.checkBuffers(withMatter=True, count=54)
 
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
     def testTorchCpu(self):
@@ -149,7 +149,38 @@ class TestProbabilityBuffers(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
     def testTorchCpuMatter(self):
-        self.checkBuffers('cpu', withMatter=True, count=9)
+        self.checkBuffers('cpu', withMatter=True, count=54)
+
+    def testMatterDiagonalizationCount(self):
+        # Distinct energies, all nine channels and both signs: the cost must
+        # scale with events, not with the number of possible channels.
+        count = 65539
+        index = np.arange(count)
+        events = NeutrinoEventBatch(np.full(count, 295.), np.linspace(.2, 5., count),
+                                    index % 3, (index // 3) % 3, index % 2 == 0)
+        oscillator = makeOscillator(VALUES, True)
+        output = np.empty(count)
+        with patch.object(oscillator.hamiltonian, '_eigh', wraps=oscillator.hamiltonian._eigh) as eigh:
+            oscillator.probability(events, outputBuffer=output)
+        self.assertEqual(eigh.call_count, 2)
+        self.assertEqual(sum(call.args[0].shape[0] for call in eigh.call_args_list), count)
+        self.assertTrue(np.isfinite(output).all())
+
+    def testLayeredMixedMatterBuffers(self):
+        from nu_waves.hamiltonian.matter import MatterProfile
+        from nu_waves.propagation.gradient import MatterDensity, ElectronFraction
+        count = 54
+        index = np.arange(count)
+        events = NeutrinoEventBatch(np.linspace(100., 900., count), np.linspace(.2, 5., count),
+                                    index % 3, (index // 3) % 3, (index // 9) % 2 == 0)
+        oscillator = makeOscillator(VALUES, True)
+        oscillator.hamiltonian.set_matter_profile(
+            MatterProfile.from_fractions([2.6, 4.1], [.5, .47], [.4, .6]))
+        basis = BASIS + (MatterDensity(0), ElectronFraction(1))
+        expected, expectedGradient = oscillator.probability(events, parameterBasis=basis)
+        output, gradients = oscillator.probability(events, outputBuffer=np.empty(count), parameterBasis=basis)
+        np.testing.assert_allclose(output, expected, atol=1e-12)
+        np.testing.assert_allclose(gradients, expectedGradient, atol=1e-8, rtol=1e-10)
 
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
     def testMps(self):
@@ -177,6 +208,13 @@ class TestProbabilityBuffers(unittest.TestCase):
             self.skipTest('CUDA unavailable')
         self.checkBuffers('cuda')
         self.checkDevicePolicy('cuda')
+
+    @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch is not installed')
+    def testCudaMatter(self):
+        import torch
+        if not torch.cuda.is_available():
+            self.skipTest('CUDA unavailable')
+        self.checkBuffers('cuda', withMatter=True, count=54)
 
     def testInvalidBuffers(self):
         oscillator = makeOscillator(VALUES)

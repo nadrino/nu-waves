@@ -32,12 +32,13 @@ Both modes call nu-waves on every iteration, including unchanged parameters;
 there is no benchmark-side probability cache. Thus unchanged timings measure
 the current recomputation cost, not the cost of a fitter skipping the worker.
 
-The current buffer implementation loops over both signs and all nine flavor
-pairs per block, evaluating matter evolution before masking channels. It can
-therefore perform multiple diagonalizations per event per call, including for
-absent channels. This benchmark measures that implementation without changing
-the library or using energy bins. Timing differences between parameter-update
-patterns do not imply partial diagonalization reuse.
+The matter buffer implementation computes one propagator per event and layer,
+with vectorized neutrino/antineutrino signs, then selects the requested flavor
+amplitude. Energies need not repeat. Earlier versions evaluated both signs and
+all nine flavor pairs separately, doing eighteen times as many event
+diagonalizations. This optimization applies even when all PMNS parameters
+change. It does not cache probabilities across evaluations or use energy bins;
+unchanged parameters still trigger recomputation.
 
 The Torch backend splits CUDA eigendecompositions into at most 16,384 matrices
 per solver call. This avoids large-batch `cusolverDnXsyevBatched_bufferSize`

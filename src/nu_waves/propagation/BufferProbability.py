@@ -1,7 +1,6 @@
 """Caller-owned event/output storage for Oscillator's probability interface."""
 
 from contextlib import nullcontext
-from types import SimpleNamespace
 import sys
 
 import numpy as np
@@ -212,15 +211,15 @@ def evaluateBuffers(oscillator, events, output, parameterBasis, gradientOutput):
                     for column, tangent in enumerate(tangents):
                         gradients[sl, column] = probabilityGradient(amplitude, tangent)
             else:
-                # Fixed channel loops avoid device mask reads or CPU grouping.
-                for sign in (False, True):
-                    for a in range(hamiltonian.n_neutrinos):
-                        for b in range(hamiltonian.n_neutrinos):
-                            group = SimpleNamespace(isAntiNu=sign, flavor_emit=a, flavor_det=b)
-                            amplitude, tangents = executor.amplitude(group, length, energy, prepared)
-                            mask = (anti[sl] == sign) & (emit[sl] == a) & (detect[sl] == b)
-                            output[sl] = xp.where(mask, xp.abs(amplitude) ** 2, output[sl])
-                            if gradients is not None:
-                                for column, tangent in enumerate(tangents):
-                                    gradients[sl, column] = xp.where(mask, probabilityGradient(amplitude, tangent), gradients[sl, column])
+                # One eigendecomposition per event (and layer), irrespective of
+                # flavor channel. Mixed CP flags stay entirely on the device.
+                propagator, tangents = executor.evolution(length, energy, prepared, anti[sl])
+                rows = (np.arange(length.shape[0]) if numpyMode else
+                        torch.arange(length.shape[0], device=device))
+                amplitude = propagator[rows, detect[sl], emit[sl]]
+                output[sl] = xp.abs(amplitude) ** 2
+                if gradients is not None:
+                    for column, tangent in enumerate(tangents):
+                        gradients[sl, column] = probabilityGradient(
+                            amplitude, tangent[rows, detect[sl], emit[sl]])
         return output if basis is None else (output, gradients)

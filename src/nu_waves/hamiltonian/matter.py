@@ -86,13 +86,17 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
         return vacuum, tangent, potentialTangent
 
     def amplitude(self, group, length, energy, model):
-        vacuum, tangent, potentialTangent = model
-        rho, fraction = self.hamiltonian.constantDensity
-        propagator, derivatives = self.hamiltonian.matterEvolution(
-            length, 0.5 / energy, vacuum, rho, fraction,
-            group.isAntiNu, tangent, potentialTangent)
+        propagator, derivatives = self.evolution(length, energy, model, group.isAntiNu)
         a, b = group.flavor_emit, group.flavor_det
         return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
+
+    def evolution(self, length, energy, model, antineutrino):
+        """Compute all channels once, allowing a CP flag per event."""
+        vacuum, tangent, potentialTangent = model
+        rho, fraction = self.hamiltonian.constantDensity
+        return self.hamiltonian.matterEvolution(
+            length, 0.5 / energy, vacuum, rho, fraction,
+            antineutrino, tangent, potentialTangent)
 
     def probabilityCompiled(self, compiled_batch):
         from nu_waves.hamiltonian.executors import evaluateCompiled
@@ -156,12 +160,10 @@ class LayeredMatterExecutor(ConstantMatterOptimizedExecutor):
                 for index, layer in enumerate(self.hamiltonian._matter_profile.layers)]
         return vacuum, tangent, potentials
 
-    def amplitude(self, group, length, energy, model):
+    def evolution(self, length, energy, model, antineutrino):
         vacuum, tangent, potentials = model
-        propagator, derivatives = self.hamiltonian.profileEvolution(
-            length, 0.5 / energy, vacuum, group.isAntiNu, tangent, potentials)
-        a, b = group.flavor_emit, group.flavor_det
-        return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
+        return self.hamiltonian.profileEvolution(
+            length, 0.5 / energy, vacuum, antineutrino, tangent, potentials)
 
 
 class Hamiltonian(HamiltonianBase):
@@ -290,12 +292,18 @@ class Hamiltonian(HamiltonianBase):
         latter receives the antineutrino sign here, without energy scaling.
         """
         xp = Backend.xp()
-        sign = -1 if antineutrino else 1
-        if antineutrino:
+        mixedSigns = getattr(antineutrino, 'ndim', 0) > 0
+        if mixedSigns:
+            anti = antineutrino[:, None, None]
+            sign = xp.where(anti, -1., 1.)
+            vacuum = xp.where(anti, xp.conjugate(vacuum), vacuum)
+        else:
+            sign = -1 if antineutrino else 1
+        if not mixedSigns and antineutrino:
             vacuum = xp.conjugate(vacuum)
-        projector = xp.zeros(vacuum.shape, dtype=Backend.complex_dtype())
-        projector[0, 0] = sign * VCOEFF_EV * rho * electronFraction
-        h = vacuum[None, ...] * inv2Energy[:, None, None] + projector[None, ...]
+        projector = xp.zeros((self.n_neutrinos, self.n_neutrinos), dtype=Backend.complex_dtype())
+        projector[0, 0] = VCOEFF_EV * rho * electronFraction
+        h = vacuum * inv2Energy[:, None, None] + sign * projector
         values, vectors = self._eigh(h)
         adjoint = xp.matrix_transpose(xp.conjugate(vectors))
         phaseValues = values * length[:, None]
@@ -303,7 +311,7 @@ class Hamiltonian(HamiltonianBase):
         propagator = (vectors * phases[:, None, :]) @ adjoint
         if vacuumTangent is None:
             return propagator, None
-        if antineutrino:
+        if not mixedSigns and antineutrino:
             vacuumTangent = xp.conjugate(vacuumTangent)
         if vacuumTangent.shape[0] == 0:
             return propagator, []
@@ -312,7 +320,10 @@ class Hamiltonian(HamiltonianBase):
         kernel = -1j * length[:, None, None] * xp.exp(-1j * midpoints) * xp.sinc(halfGaps / 3.141592653589793)
         tangents = []
         for column in range(vacuumTangent.shape[0]):
-            hTangent = vacuumTangent[column] * inv2Energy[:, None, None]
+            tangent = vacuumTangent[column]
+            if mixedSigns:
+                tangent = xp.where(anti, xp.conjugate(tangent), tangent)
+            hTangent = tangent * inv2Energy[:, None, None]
             if potentialTangent is not None:
                 hTangent = hTangent + sign * potentialTangent[column]
             spectral = adjoint @ hTangent @ vectors
