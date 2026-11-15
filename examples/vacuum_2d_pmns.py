@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import time
 import os
@@ -32,8 +33,8 @@ h = vacuum.Hamiltonian(
 osc = Oscillator(hamiltonian=h)
 
 # --- Grid definition (x: energy, y: baseline) ---
-nE = 1000
-nL = 1000
+nE = sampleCount(1000)
+nL = sampleCount(1000)
 E_vals = np.linspace(0.2, 5.0, nE)     # GeV  (x-axis)
 L_vals = np.linspace(1000, 2000.0, nL) # km   (y-axis)
 E_grid, L_grid = np.meshgrid(E_vals, L_vals, indexing="xy")
@@ -42,9 +43,7 @@ L_flat = L_grid.ravel()  # shape (nE * nL,)
 E_flat = E_grid.ravel()
 
 # --- Choose vacuum or matter ---
-# osc.use_vacuum()  # vacuum
-# For constant density (crust-like), uncomment:
-# osc.set_constant_density(rho_gcm3=2.8, Ye=0.5)
+# This example uses the vacuum Hamiltonian constructed above.
 
 t0 = time.perf_counter()
 # --- Compute probabilities in grid mode (shape -> (nL, nE) after selection) ---
@@ -88,7 +87,7 @@ fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), constrained_layout=True)
 plot_oscillogram(axes[0], E_vals, L_vals, P_mue,  r"$P(\nu_\mu\to\nu_e)$")
 plot_oscillogram(axes[1], E_vals, L_vals, P_mumu, r"$P(\nu_\mu\to\nu_\mu)$")
 
-# plt.savefig("./figures/vacuum_2d_pmns.pdf") # too heavy
-plt.savefig("./figures/vacuum_2d_pmns.jpg", dpi=150) if not os.environ.get("CI") else None
+# plt.savefig(str(figureDirectory / "vacuum_2d_pmns.pdf")) # too heavy
+plt.savefig(str(figureDirectory / "vacuum_2d_pmns.jpg"), dpi=150) if not os.environ.get("CI") else None
 plt.show()
 

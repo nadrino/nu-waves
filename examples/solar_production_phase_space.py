@@ -1,8 +1,9 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from nu_waves.sources.sun import SolarModel, SolarSource, R_SUN
+from nu_waves.sources.sun import SolarModel, SolarSource, R_SUN, integrateTrapezoid
 
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
@@ -22,13 +23,13 @@ def plot_phase_space(model, source: SolarSource, outdir="figures"):
     plt.show()
 
     # 1D marginals
-    r = np.linspace(0, R_SUN, 1000)
+    r = np.linspace(0, R_SUN, sampleCount(1000))
     fr = model.radial_pdf(source, r)
-    Egrid = np.linspace(*model.sources[source].e_range, 2000)
+    Egrid = np.linspace(*model.sources[source].e_range, sampleCount(2000))
     fE = model.spectrum_pdf(source, Egrid)
 
     plt.figure(figsize=(6.5, 4.0))
-    plt.plot(r / R_SUN, fr / np.trapezoid(fr, r), label="radial pdf")
+    plt.plot(r / R_SUN, fr / integrateTrapezoid(fr, r), label="radial pdf")
     plt.xlabel(r"$r/R_\odot$")
     plt.ylabel("pdf")
     plt.title(f"{source.value} radial production pdf")
@@ -37,7 +38,7 @@ def plot_phase_space(model, source: SolarSource, outdir="figures"):
     plt.show()
 
     plt.figure(figsize=(6.5, 4.0))
-    plt.plot(Egrid, fE / np.trapezoid(fE, Egrid), label="energy pdf")
+    plt.plot(Egrid, fE / integrateTrapezoid(fE, Egrid), label="energy pdf")
     plt.xlabel(r"$E_\nu$ [MeV]")
     plt.ylabel("pdf")
     plt.title(f"{source.value} energy spectrum (shape only)")
@@ -47,11 +48,11 @@ def plot_phase_space(model, source: SolarSource, outdir="figures"):
 
 def plot_multi_radial(model, sources, outdir="figures"):
     ensure_dir(outdir)
-    r = np.linspace(0, R_SUN, 1000)
+    r = np.linspace(0, R_SUN, sampleCount(1000))
     plt.figure(figsize=(6.8, 4.2))
     for s in sources:
         fr = model.radial_pdf(s, r)
-        fr /= np.trapezoid(fr, r)
+        fr /= integrateTrapezoid(fr, r)
         plt.plot(r / R_SUN, fr, label=s.value)
     plt.xlabel(r"$r/R_\odot$")
     plt.ylabel("pdf")
@@ -62,9 +63,9 @@ def plot_multi_radial(model, sources, outdir="figures"):
 
 
 def describe_radial(model, source):
-    r = np.linspace(0, R_SUN, 2000)
+    r = np.linspace(0, R_SUN, sampleCount(2000))
     fr = model.radial_pdf(source, r)
-    fr /= np.trapezoid(fr, r)
+    fr /= integrateTrapezoid(fr, r)
     peak_x = (r[np.argmax(fr)] / R_SUN)
     cdf = np.cumsum(fr);
     cdf /= cdf[-1]

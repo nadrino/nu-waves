@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import matplotlib.pyplot as plt
 from nu_waves.models.mixing import Mixing
@@ -27,7 +28,7 @@ h = vacuum.Hamiltonian(
 osc = Oscillator(hamiltonian=h)
 
 E_min, E_max = 0.2, 3.0
-Enu_list = np.linspace(E_min, E_max, 200)
+Enu_list = np.linspace(E_min, E_max, sampleCount(200))
 P_no = osc.probability(L_km=295, E_GeV=Enu_list, flavor_emit=flavors.muon, flavor_det=flavors.electron)
 
 h.spectrum.set_dm2({(3, 2): -0.0024428})

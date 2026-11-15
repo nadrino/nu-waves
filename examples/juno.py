@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import matplotlib.pyplot as plt
 from nu_waves.models.mixing import Mixing
@@ -10,12 +11,10 @@ from nu_waves.interactions.ibd_cross_section import IBDCrossSection
 import nu_waves.utils.flavors as flavors
 import nu_waves.utils.style
 
-import torch
-Backend.set_api(torch, device='mps')
 
 resolution_at_1MeV = 0.03
-n_Enu = int(1E3)
-n_samples = int(5E4)
+n_Enu = sampleCount(int(1E3), 32)
+n_samples = sampleCount(int(5E4), 32)
 
 
 E = np.linspace(1.8, 9.5, n_Enu)

@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -17,7 +18,7 @@ pmns = Mixing(n_neutrinos=3, mixing_angles=angles)
 U = pmns.build_mixing_matrix()
 
 spec = Spectrum(n_neutrinos=3, m_lightest=0.0)
-spec._generate_dm2_matrix({(2, 1): dm21, (3, 1): dm31})
+spec = Spectrum(n_neutrinos=3, dm2={(2, 1): dm21, (3, 1): dm31})
 m2 = spec.get_m2()
 
 # ---- 1) Locate the H-resonance on a smooth profile (no shock) ----
