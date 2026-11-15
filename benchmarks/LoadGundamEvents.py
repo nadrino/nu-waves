@@ -135,7 +135,7 @@ def makeEventBatch(arrays, baselineKm, device="numpy", dtype="float64"):
     return NeutrinoEventBatch(**values)
 
 
-def main():
+def makeParser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="*", help="ROOT files/globs, optionally ending in .root:tree")
     parser.add_argument("--dataset-list", dest="datasetList", help="OA2026 datasetList.yaml")
@@ -149,7 +149,10 @@ def main():
     parser.add_argument("--max-events", dest="maxEvents", type=int)
     parser.add_argument("--step-size", dest="stepSize", default="100 MB", help="Uproot read chunk size")
     parser.add_argument("--output", help="Optional portable .npz event archive (host arrays)")
-    args = parser.parse_args()
+    return parser
+
+
+def validateArgs(parser, args):
     if not args.inputs and not args.datasetList:
         parser.error("provide ROOT inputs or --dataset-list")
     if args.dataset and not args.datasetList:
@@ -158,6 +161,12 @@ def main():
         parser.error("--max-events must be positive")
     if not np.isfinite(args.baselineKm) or args.baselineKm <= 0:
         parser.error("--baseline-km must be finite and positive")
+
+
+def main():
+    parser = makeParser()
+    args = parser.parse_args()
+    validateArgs(parser, args)
     configureNuWaves(args.nuWavesPath)
     import nu_waves
 
