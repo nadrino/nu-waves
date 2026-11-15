@@ -39,6 +39,11 @@ absent channels. This benchmark measures that implementation without changing
 the library or using energy bins. Timing differences between parameter-update
 patterns do not imply partial diagonalization reuse.
 
+The Torch backend splits CUDA eigendecompositions into at most 16,384 matrices
+per solver call. This avoids large-batch `cusolverDnXsyevBatched_bufferSize`
+failures seen with some PyTorch/cuSOLVER versions. All matrices are still
+processed on the GPU; splitting is included in the measured execution time.
+
 `LoadGundamEvents.py` prepares a `NeutrinoEventBatch` independently of GUNDAM.
 Install `numpy`, `uproot` (including Awkward), and `PyYAML` in your environment.
 Torch is needed only for `--device cpu` or `--device cuda`.

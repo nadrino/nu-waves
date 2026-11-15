@@ -2,6 +2,8 @@
 
 class TorchBackend:
 
+    cudaEighBatchSize = 16384
+
     def __init__(self, device=None):
         import torch
         self.xp = torch
@@ -45,12 +47,34 @@ class TorchBackend:
                 vals = vals.to(dtype=self.xp.float32).to(H.device)
                 vecs = vecs.to(dtype=self.xp.complex64).to(H.device)
                 return vals.contiguous(), vecs.contiguous()
-            # other devices (cuda/cpu) → native
+            if device is not None and device.type == "cuda":
+                return self.eighBatched(H, self.cudaEighBatchSize)
+            # CPU keeps the native implementation.
             return self.xp.linalg.eigh(H)
 
         L.eigh = eigh
 
         return L
+
+    def eighBatched(self, matrices, batchSize):
+        """Bound CUDA solver batch sizes without host transfers.
+
+        Some cuSOLVER/PyTorch combinations reject large batches of small
+        matrices (https://github.com/pytorch/pytorch/issues/166004).
+        Flatten only batch axes, then restore the original result shapes.
+        This helper also runs on CPU for regression tests.
+        """
+        if batchSize <= 0:
+            raise ValueError("batchSize must be positive")
+        n = matrices.shape[-1]
+        count = matrices.numel() // (n * n) if n else 0
+        if count <= batchSize:
+            return self.xp.linalg.eigh(matrices)
+        flat = matrices.reshape(-1, n, n)
+        parts = [self.xp.linalg.eigh(part) for part in flat.split(batchSize)]
+        values = self.xp.cat([part[0] for part in parts], dim=0)
+        vectors = self.xp.cat([part[1] for part in parts], dim=0)
+        return values.reshape(matrices.shape[:-1]), vectors.reshape(matrices.shape)
 
     @property
     def device(self):
