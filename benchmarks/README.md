@@ -1,5 +1,34 @@
 # OA2026 event loading
 
+## CUDA eigensolver batch-size sweep
+
+```bash
+python benchmarks/SweepCudaBatches.py \
+  --dataset-list /path/to/gundam/config/dataset/datasetList.yaml \
+  --nu-waves-path ./ --device cuda \
+  --rounds 3 --warmup 3 --repeats 10 --report CudaBatchSweep.json
+```
+
+The sweep loads/transfers events once and compares solver batches of 4 096,
+8 192, 16 384, 32 768, 49 152 and 61 440 matrices. The outer event blocks remain
+65 536. Use `--batch-sizes 8192 16384 32768` to customize the sweep. Sizes above
+61 440 are excluded to stay below the previously observed solver failure;
+this cap does not guarantee compatibility with every cuSOLVER version.
+
+Each round shuffles the size order reproducibly (`--seed 42`) and warms up each
+configuration. All six PMNS parameters alternate between two proposals; result
+caching is disabled and the oscillator is rebuilt per call. Full evaluation
+wall times include parameter updates and CUDA completion, without a profiler.
+ROOT reading, transfers, probability checks and report writes are not timed.
+Both proposals are checked against probabilities computed at size 16 384.
+
+The report records per-round raw samples, combined medians/p95, expected native
+solver call counts, peak CUDA memory and environment information. It is updated
+after each completed configuration. Settings are changed only inside this
+process and restored afterwards; the library default stays at 16 384. Compare
+round-to-round variation before choosing a default. `--device cpu` forces the
+same splitting for smoke tests, without predicting CUDA speed.
+
 ## CUDA profiling
 
 ```bash
