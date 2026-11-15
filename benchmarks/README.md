@@ -26,6 +26,10 @@ zero CUDA events and warns; CPU-only output cannot establish GPU bottlenecks.
 `--device cpu` is available for local smoke testing only.
 
 Stage scopes are temporary instrumentation installed only by this script.
+`matterAmplitude` identifies the direct requested-channel calculation used for
+constant matter without gradients. It avoids constructing the full propagator
+with a batched matrix multiplication. Gradients and layered profiles retain
+the full propagator path.
 `matterEvolution` includes Hamiltonian assembly, eigendecomposition and
 propagator construction; its nested `eigendecomposition` scope isolates the
 solver. Native operators (`exp`, `bmm`, indexing, copies, etc.) give the finer

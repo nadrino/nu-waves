@@ -281,16 +281,8 @@ class Hamiltonian(HamiltonianBase):
             propagator = step @ propagator
         return propagator, derivatives
 
-    def matterEvolution(self, length, inv2Energy, vacuum, rho, electronFraction,
-                        antineutrino=False, vacuumTangent=None, potentialTangent=None):
-        """Return propagator and optional tangents, sharing the eigendecomposition.
-
-        The Frechet kernel uses normalized sinc and stays finite at degeneracy.
-        Backend.linalg.eigh owns device-specific fallbacks (including MPS).
-        vacuumTangent contains mass-squared operator derivatives; optional
-        potentialTangent contains neutrino potential derivatives in eV. The
-        latter receives the antineutrino sign here, without energy scaling.
-        """
+    def matterEigensystem(self, inv2Energy, vacuum, rho, electronFraction, antineutrino=False):
+        """Build and diagonalize one matter Hamiltonian per event."""
         xp = Backend.xp()
         mixedSigns = getattr(antineutrino, 'ndim', 0) > 0
         if mixedSigns:
@@ -304,7 +296,39 @@ class Hamiltonian(HamiltonianBase):
         projector = xp.zeros((self.n_neutrinos, self.n_neutrinos), dtype=Backend.complex_dtype())
         projector[0, 0] = VCOEFF_EV * rho * electronFraction
         h = vacuum * inv2Energy[:, None, None] + sign * projector
-        values, vectors = self._eigh(h)
+        return self._eigh(h)
+
+    def matterAmplitude(self, length, inv2Energy, vacuum, rho, electronFraction,
+                        antineutrino, rows, emit, detect):
+        """Evaluate one channel per event without building full propagators.
+
+        V contains eigenvectors in columns. The requested S[b,a] is the
+        spectral sum V[b,i] exp(-i lambda[i] L) conj(V[a,i]). This path is for
+        constant matter and probability-only evaluation; layers need composition.
+        """
+        xp = Backend.xp()
+        values, vectors = self.matterEigensystem(inv2Energy, vacuum, rho, electronFraction, antineutrino)
+        phases = xp.exp(-1j * values * length[:, None])
+        return xp.sum(vectors[rows, detect, :] * phases * xp.conjugate(vectors[rows, emit, :]), axis=-1)
+
+    def matterEvolution(self, length, inv2Energy, vacuum, rho, electronFraction,
+                        antineutrino=False, vacuumTangent=None, potentialTangent=None):
+        """Return propagator and optional tangents, sharing the eigendecomposition.
+
+        The Frechet kernel uses normalized sinc and stays finite at degeneracy.
+        Backend.linalg.eigh owns device-specific fallbacks (including MPS).
+        vacuumTangent contains mass-squared operator derivatives; optional
+        potentialTangent contains neutrino potential derivatives in eV. The
+        latter receives the antineutrino sign here, without energy scaling.
+        """
+        xp = Backend.xp()
+        values, vectors = self.matterEigensystem(inv2Energy, vacuum, rho, electronFraction, antineutrino)
+        mixedSigns = getattr(antineutrino, 'ndim', 0) > 0
+        if mixedSigns:
+            anti = antineutrino[:, None, None]
+            sign = xp.where(anti, -1., 1.)
+        else:
+            sign = -1 if antineutrino else 1
         adjoint = xp.matrix_transpose(xp.conjugate(vectors))
         phaseValues = values * length[:, None]
         phases = xp.exp(-1j * phaseValues)

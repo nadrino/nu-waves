@@ -245,10 +245,17 @@ def evaluateBuffers(oscillator, events, output, parameterBasis, gradientOutput):
             else:
                 # One eigendecomposition per event (and layer), irrespective of
                 # flavor channel. Mixed CP flags stay entirely on the device.
-                propagator, tangents = executor.evolution(length, energy, prepared, anti[sl])
                 rows = (np.arange(length.shape[0]) if numpyMode else
                         torch.arange(length.shape[0], device=device))
-                amplitude = propagator[rows, detect[sl], emit[sl]]
+                if basis is None and hamiltonian._matter_profile is None:
+                    rho, fraction = hamiltonian.constantDensity
+                    amplitude = hamiltonian.matterAmplitude(
+                        length, 0.5 / energy, prepared[0], rho, fraction,
+                        anti[sl], rows, emit[sl], detect[sl])
+                    tangents = None
+                else:
+                    propagator, tangents = executor.evolution(length, energy, prepared, anti[sl])
+                    amplitude = propagator[rows, detect[sl], emit[sl]]
                 output[sl] = xp.abs(amplitude) ** 2
                 if gradients is not None:
                     for column, tangent in enumerate(tangents):

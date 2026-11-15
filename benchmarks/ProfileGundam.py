@@ -35,6 +35,7 @@ def annotateStages():
                (Spectrum, 'relativeMasses', 'massSpectrum'),
                (ConstantMatterOptimizedExecutor, 'prepareModel', 'prepareMatterModel'),
                (Hamiltonian, 'matterEvolution', 'matterEvolution'),
+               (Hamiltonian, 'matterAmplitude', 'matterAmplitude'),
                (Hamiltonian, '_eigh', 'eigendecomposition'),
                (BufferProbability, 'modelSnapshot', 'cacheModelSnapshot')]
     with ExitStack() as stack:

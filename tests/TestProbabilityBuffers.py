@@ -166,6 +166,37 @@ class TestProbabilityBuffers(unittest.TestCase):
         self.assertEqual(sum(call.args[0].shape[0] for call in eigh.call_args_list), count)
         self.assertTrue(np.isfinite(output).all())
 
+    def testDirectMatterAmplitude(self):
+        # All channels and CP signs, zero baseline and degenerate spectra.
+        index = np.arange(54)
+        arrays = [np.linspace(0., 1300., 54), np.linspace(.07, 9., 54),
+                  index % 3, (index // 3) % 3, (index // 9) % 2 == 0]
+        modes = [None]
+        if importlib.util.find_spec('torch'):
+            modes.append('cpu')
+        for device in modes:
+            if device:
+                import torch
+                events = NeutrinoEventBatch(*(torch.as_tensor(a) for a in arrays))
+                output = torch.empty(54, dtype=torch.float64)
+                toHost = lambda value: value.numpy().copy()
+            else:
+                events = NeutrinoEventBatch(*arrays)
+                output = np.empty(54)
+                toHost = lambda value: value.copy()
+            for dm21, dm32, density in [(7.5e-5, 2.5e-3, 2.6), (7.5e-5, -2.5e-3, 2.6), (0., 0., 0.)]:
+                values = list(VALUES)
+                values[4:6] = [dm21, dm32]
+                parameters = torch.tensor(values, dtype=torch.float64) if device else np.array(values)
+                oscillator = makeOscillator(parameters, True)
+                oscillator.hamiltonian.set_constant_density(density)
+                # Empty gradient basis intentionally retains full propagation.
+                expected = toHost(oscillator.probability(events, outputBuffer=output, parameterBasis=())[0])
+                with patch.object(oscillator.hamiltonian, 'matterEvolution',
+                                  side_effect=AssertionError('Full propagator constructed')):
+                    actual = toHost(oscillator.probability(events, outputBuffer=output))
+                np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=1e-12)
+
     def testLayeredMixedMatterBuffers(self):
         from nu_waves.hamiltonian.matter import MatterProfile
         from nu_waves.propagation.gradient import MatterDensity, ElectronFraction
