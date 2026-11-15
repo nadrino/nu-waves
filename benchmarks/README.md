@@ -1,5 +1,45 @@
 # OA2026 event loading
 
+## CUDA profiling
+
+```bash
+python benchmarks/ProfileGundam.py \
+  --dataset-list /path/to/gundam/config/dataset/datasetList.yaml \
+  --nu-waves-path ./ --device cuda --cache-probability \
+  --cases all unchanged --warmup 3 --repeats 10 --iterations 3 \
+  --profile-dir MatterProfile
+```
+
+This loads/transfers the batch once for all cases. It measures an unprofiled
+wall-clock baseline after warmup, then captures CPU and CUDA activity using
+Torch Profiler. `all` alternates all six PMNS parameters; `unchanged` exercises
+cache hits if enabled. Optional `mass` changes only delta_m2_32; `mixing` changes
+only theta_23. Probabilities are computed without gradients, matching the
+existing benchmark. The output directory must not already exist.
+
+Return the complete directory: `summary.json` records the environment,
+unprofiled timings and operation statistics, each `<case>.txt` contains CPU/GPU
+tables, and `<case>.trace.json` contains a Chrome/Perfetto timeline including
+CUDA kernels, memory transfers, synchronization and `nuWaves::` stage labels.
+If CUDA capture is unavailable (e.g. CUPTI restrictions), the script reports
+zero CUDA events and warns; CPU-only output cannot establish GPU bottlenecks.
+`--device cpu` is available for local smoke testing only.
+
+Stage scopes are temporary instrumentation installed only by this script.
+`matterEvolution` includes Hamiltonian assembly, eigendecomposition and
+propagator construction; its nested `eigendecomposition` scope isolates the
+solver. Native operators (`exp`, `bmm`, indexing, copies, etc.) give the finer
+breakdown. Inclusive parent/child times must not be summed. Device operation
+time sums are not necessarily elapsed time; inspect the timeline for overlap
+and CPU launch gaps. Per-operation times aggregate all captured evaluations.
+
+The separate unprofiled baseline is the performance reference: profiler hooks
+change timings. Shapes and memory tracking are disabled by default to reduce
+distortion; enable `--record-shapes` / `--profile-memory` for a deeper second
+capture. Peak CUDA allocated/reserved memory is reported when available, but
+profiler overhead can affect it. This is operator/timeline profiling, not a
+hardware-counter occupancy or bandwidth analysis.
+
 ## Matter probability benchmark
 
 ```bash
