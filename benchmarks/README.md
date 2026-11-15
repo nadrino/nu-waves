@@ -28,9 +28,12 @@ The percentile is descriptive; increase repetitions for stable statistics.
 `--model-lifetime rebuild` (default) reconstructs the oscillator every call as
 the supplied GUNDAM worker does. Repeat with `--model-lifetime reuse` to retain
 one oscillator per case with live scalar views into its parameter buffer.
-Both modes call nu-waves on every iteration, including unchanged parameters;
-there is no benchmark-side probability cache. Thus unchanged timings measure
-the current recomputation cost, not the cost of a fitter skipping the worker.
+Both modes call nu-waves on every iteration, including unchanged parameters.
+Add `--cache-probability` to enable the library's batch result cache. The cache
+belongs to the batch, so it also works with `--model-lifetime rebuild`. Without
+this flag every iteration recomputes the probabilities. With the flag, only
+the unchanged case hits: changing cases alternate two proposals and the cache
+retains only the most recent result. Cache lookup and result copying are timed.
 
 The matter buffer implementation computes one propagator per event and layer,
 with vectorized neutrino/antineutrino signs, then selects the requested flavor
@@ -38,7 +41,39 @@ amplitude. Energies need not repeat. Earlier versions evaluated both signs and
 all nine flavor pairs separately, doing eighteen times as many event
 diagonalizations. This optimization applies even when all PMNS parameters
 change. It does not cache probabilities across evaluations or use energy bins;
-unchanged parameters still trigger recomputation.
+unchanged parameters still trigger recomputation unless caching is enabled.
+
+### Batch probability cache API
+
+```python
+events = NeutrinoEventBatch(lengths, energies, emitted, detected, anti,
+                            cacheProbability=True)
+oscillator.probability(events, outputBuffer=weights)
+# Repeated calls with the same physical model reuse the last result.
+# After ANY modification of event arrays, including shared/external writes:
+events.invalidateCache()
+```
+
+Caching is opt-in, for the buffer evaluation path (explicit `outputBuffer`, or
+automatic output allocation for device batches). It assumes event arrays stay
+fixed until `invalidateCache()` is called. No checksum, event comparison or
+implicit detection of in-place event edits is performed. Separate batches have
+separate caches. Recreating a batch creates an empty cache.
+
+The key compares exact values of the small prepared physical model and matter
+profile, output device/precision/shape, CP default and gradient basis. Parameter
+changes, including writes through external shared buffers, are detected by value,
+not by tensor identity or version. Gradients are cached together with their
+probabilities. Custom profile tangents are included in the model comparison.
+CUDA model comparisons involve host readback/synchronization; event arrays and
+cached results stay on their device. This mode therefore relaxes the ordinary
+buffer path's guarantee of no host synchronization.
+
+Only one result is retained, requiring an additional N-element probability
+array and, if requested, an N-by-P gradient array. Cache hits copy into the
+requested output buffers; caller writes to previous results do not corrupt the
+cache. `invalidateCache()` also releases these retained arrays. The cache does
+not currently retain event preprocessing or skip small model construction.
 
 The Torch backend splits CUDA eigendecompositions into at most 16,384 matrices
 per solver call. This avoids large-batch `cusolverDnXsyevBatched_bufferSize`

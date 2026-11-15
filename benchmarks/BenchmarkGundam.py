@@ -2,6 +2,7 @@
 """Benchmark constant-density matter probabilities under fitter parameter updates."""
 
 from itertools import combinations
+from dataclasses import replace
 import json
 from pathlib import Path
 import platform
@@ -38,7 +39,7 @@ def runBenchmark(events, args):
     """Time update + optional model construction + probability + device completion.
 
     Parameter proposals and event transfers are prepared outside the timer.
-    No probability cache or gradients are used, even for unchanged parameters.
+    Gradients are disabled; batch probability caching is optional.
     """
     torch = None
     if args.device == "numpy":
@@ -61,6 +62,8 @@ def runBenchmark(events, args):
               for i, j in combinations(range(6), 2)]
     results = []
     for name, changed in cases:
+        if hasattr(events, 'invalidateCache'):
+            events.invalidateCache()
         parameters[...] = convert(nominalValues)
         oscillator = makeOscillator(parameters, args.density, args.electronFraction)
         # Alternate proposals around nominal: no drift and every changing call
@@ -114,6 +117,8 @@ def main():
     parser.add_argument("--model-lifetime", dest="modelLifetime", choices=["rebuild", "reuse"], default="rebuild",
                         help="rebuild matches the GUNDAM worker; reuse retains live parameter views")
     parser.add_argument("--report", help="Write complete benchmark results as JSON")
+    parser.add_argument("--cache-probability", dest="cacheProbability", action="store_true",
+                        help="Cache the last batch result, checking physical model values")
     args = parser.parse_args()
     validateArgs(parser, args)
     if args.repeats < 2 or args.warmup < 1:
@@ -130,6 +135,8 @@ def main():
     sources = resolveInputs(args)
     arrays, stats = loadEvents(sources, maxEvents=args.maxEvents, stepSize=args.stepSize, dtype=args.dtype)
     events = makeEventBatch(arrays, args.baselineKm, args.device, args.dtype)
+    if args.cacheProbability:
+        events = replace(events, cacheProbability=True)
     if args.output:
         np.savez(args.output, L_km=np.full(stats["loaded"], args.baselineKm, dtype=args.dtype), **arrays)
     metadata = dict(nuWavesPath=nu_waves.__file__, python=platform.python_version(), numpy=np.__version__,
@@ -138,7 +145,7 @@ def main():
                     warmup=args.warmup, repeats=args.repeats, counts=stats,
                     nominalParameters=dict(zip(parameterNames, nominalValues.tolist())),
                     parameterSteps=dict(zip(parameterNames, parameterSteps.tolist())),
-                    inputs=sources, gradients=False, probabilityCache=False)
+                    inputs=sources, gradients=False, probabilityCache=args.cacheProbability)
     if args.device != "numpy":
         import torch
 
