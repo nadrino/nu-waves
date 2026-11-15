@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -11,12 +12,10 @@ from nu_waves.hamiltonian import matter
 from nu_waves.hamiltonian import vacuum
 from nu_waves.propagation.oscillator import Oscillator
 from nu_waves.matter.prem import PREMModel
-from nu_waves.matter.profile import MatterProfile
+from nu_waves.hamiltonian.matter import MatterProfile
 import nu_waves.utils.style
 
 
-import torch
-Backend.set_api(torch, device='mps') # no eigen decompose in MPS, will fallback to CPU
 # Backend.set_api(torch, device='cpu') # fastest
 
 # import jax
@@ -24,15 +23,15 @@ Backend.set_api(torch, device='mps') # no eigen decompose in MPS, will fallback 
 # Backend.set_api(jax, device='cpu')
 
 
-E_GeV = np.logspace(-1, 2, 400)     # x
-cosz_binning  = np.linspace(-1.0, 1.0, 400)     # y (upgoing)
+E_GeV = np.logspace(-1, 2, sampleCount(400))     # x
+cosz_binning  = np.linspace(-1.0, 1.0, sampleCount(400))     # y (upgoing)
 prem  = PREMModel()
 
 # choose one:
 # SCHEME = "prem_layers"      # PREM shells
 SCHEME = "hist_density"   # fine histogram of density along path
-n_bins_layers = 1000
-n_bins_density = 100 #
+n_bins_layers = sampleCount(1000, 32)
+n_bins_density = sampleCount(100, 16) #
 
 # 3 flavors PMNS, PDG values (2025)
 angles = {(1, 2): np.deg2rad(33.4), (1, 3): np.deg2rad(8.6), (2, 3): np.deg2rad(49)}
@@ -146,6 +145,7 @@ for ax in axs[:,0]:
 cbar = fig.colorbar(m0, ax=axs, location="right", fraction=0.05, pad=0.03)
 cbar.set_label("Oscillation probability", labelpad=10, fontsize=13)
 
-plt.savefig("./figures/matter_prem_test.pdf") # too heavy
-plt.savefig("./figures/matter_prem_test.jpg", dpi=150) if not os.environ.get("CI") else None
+if not os.environ.get("CI"):
+    plt.savefig(str(figureDirectory / "matter_prem_test.pdf"))
+plt.savefig(str(figureDirectory / "matter_prem_test.jpg"), dpi=150) if not os.environ.get("CI") else None
 plt.show()

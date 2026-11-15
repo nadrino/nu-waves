@@ -3,7 +3,7 @@ from nu_waves.state.wave_function import WaveFunction, Basis
 from nu_waves.globals.backend import Backend
 from nu_waves.utils.units import GEV_TO_EV, KM_TO_EVINV
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 
@@ -18,11 +18,24 @@ class NeutrinoEvent:
 
 @dataclass(frozen=True, slots=True)
 class NeutrinoEventBatch:
+    """Event storage; opt-in caching assumes arrays stay fixed until invalidation.
+
+    With cacheProbability=True, call invalidateCache() after ANY in-place event
+    edit. No event checksum is computed. Cached buffer evaluations compare the
+    small physical model on each call, which can synchronize CUDA with the host.
+    The cache belongs to this batch and survives oscillator reconstruction.
+    """
     L_km: any
     E_GeV: any
     flavor_emit: any
     flavor_det: any
     isAntiNu: any = None
+    cacheProbability: bool = False
+    _probabilityCache: dict = field(default_factory=dict, init=False, repr=False, compare=False)
+
+    def invalidateCache(self):
+        """Discard cached probabilities/gradients after editing event storage."""
+        self._probabilityCache.clear()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +101,8 @@ class Oscillator:
         Returns the supplied output (and a Jacobian when parameterBasis is set).
         Caller-owned inputs must not overlap outputs; validate finite values,
         positive energies and flavor bounds before calling. No value validation
-        or host synchronization is performed in this mode.
+        or host synchronization is performed in this mode, unless the batch's
+        opt-in cacheProbability compares small model values on the host.
         """
         from nu_waves.propagation.BufferProbability import findDeviceInput, evaluateBuffers
         deviceInput = findDeviceInput(self, L_km, E_GeV, flavor_emit, flavor_det)

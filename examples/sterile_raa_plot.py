@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import os
 import matplotlib.pyplot as plt
@@ -18,9 +19,9 @@ import time
 # Backend.set_api(jax, device='cpu')
 
 
-nBins_L = 200
+nBins_L = sampleCount(200, 32)
 E_res = 0.05
-nSamples_E = 10000
+nSamples_E = sampleCount(10000, 32)
 fixed_E = 0.003 # GeV
 L_km_list = np.logspace(-2, 2, nBins_L)
 
@@ -102,7 +103,7 @@ plt.minorticks_on()
 plt.tight_layout()
 
 plt.tight_layout()
-plt.savefig("./figures/sterile_raa_plot.jpg", dpi=150)  if not os.environ.get("CI") else None
+plt.savefig(str(figureDirectory / "sterile_raa_plot.jpg"), dpi=150)  if not os.environ.get("CI") else None
 plt.show()
 
 

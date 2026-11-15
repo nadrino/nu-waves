@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import os
 import matplotlib.pyplot as plt
@@ -11,7 +12,6 @@ import nu_waves.utils.style
 import time
 
 
-import torch
 # Backend.set_api(torch, device='mps')
 # Backend.set_api(torch, device='cpu')
 
@@ -19,8 +19,8 @@ import torch
 # Backend.set_api(jax, device='mps')
 # Backend.set_api(jax, device='cpu')
 
-nBins_L = 200
-nSamples_E = int(1E6)
+nBins_L = sampleCount(200, 32)
+nSamples_E = sampleCount(int(1E6), 32)
 E_res = 0.1
 
 # 3 flavors PMNS, PDG values (2025)
@@ -85,5 +85,5 @@ plt.ylim(0, 1.05)
 plt.legend()
 plt.tight_layout()
 
-plt.savefig("./figures/vacuum_2flavors.jpg", dpi=150)  if not os.environ.get("CI") else None
+plt.savefig(str(figureDirectory / "vacuum_2flavors.jpg"), dpi=150)  if not os.environ.get("CI") else None
 plt.show()

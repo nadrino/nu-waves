@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import os
 from pathlib import Path
 import urllib.request
@@ -7,55 +8,37 @@ import matplotlib.pyplot as plt
 from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.propagation.oscillator import Oscillator
-from nu_waves.matter.solar import load_bs05_agsop  # you added this in solar.py
+from nu_waves.hamiltonian import vacuum
+from Support.ExampleSupport import adiabaticMassFractions, initialMassComposition, loadSolarProfile, solarHamiltonians
+from nu_waves.matter.solar import load_bs05_agsop
 import nu_waves.utils.style
 
-# toggle for CPU/GPU
-# torch_backend = None
-torch_backend = make_torch_backend(seed=0, use_complex64=True)
 
-URL = "https://www.sns.ias.edu/~jnb/SNdata/Export/BS2005/bs05_agsop.dat"
-DATA_DIR = Path("./data/ssm")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-LOCAL = DATA_DIR / "bs05_agsop.dat"
-
-# 1) Download once if needed
-if not LOCAL.exists():
-    print(f"Downloading BS05 table to {LOCAL} …")
-    urllib.request.urlretrieve(URL, LOCAL.as_posix())
-    print("Done.")
-
-# 2) Load SSM profile (ρ(r), Ye(r), R_sun)
-sol = load_bs05_agsop(LOCAL.as_posix())  # -> SolarProfileSSM
+sol = loadSolarProfile()
 
 # 3) Oscillator (NumPy backend)
 angles = {(1, 2): np.deg2rad(33.4), (1, 3): np.deg2rad(8.6), (2, 3): np.deg2rad(49)}
 phases = {(1, 3): np.deg2rad(195)}
 
 # Masses, normal ordering
-spec = Spectrum(n_neutrinos=3, m_lightest=0.)
-spec._generate_dm2_matrix({(2, 1): 7.42e-5, (3, 2): 0.0024428})
+spec = Spectrum(n_neutrinos=3, dm2={(2, 1): 7.42e-5, (3, 2): 0.0024428})
 
-osc = Oscillator(
-    mixing_matrix=Mixing(n_neutrinos=3, mixing_angles=angles, dirac_phases=phases).build_mixing_matrix(),
-    m2_list=spec.get_m2(),
-    backend=torch_backend
-)
+osc = Oscillator(vacuum.Hamiltonian(Mixing(n_neutrinos=3, mixing_angles=angles, dirac_phases=phases), spec, False))
 
 # 4) Physics knobs
 E_GeV   = 0.008                      # 10 MeV
 r_emit  = 0.05 * sol.R_sun_km        # emission radius
 # distances from emission to the surface; include 0 for marker
 s_max   = sol.R_sun_km - r_emit
-s_km    = np.concatenate(([0.0], np.geomspace(1.0, s_max, 799)))  # (n,)
+s_km    = np.concatenate(([0.0], np.geomspace(1.0, s_max, sampleCount(799))))  # (n,)
 
 # 5) Adiabatic evolution from emission
-F = osc.adiabatic_mass_fractions_from_emission(
+F = adiabaticMassFractions(osc,
     E_GeV=E_GeV, profile=sol, r_emit_km=r_emit, s_km=s_km, alpha=0, antineutrino=False
 )  # shape (n, N)
 
 # Consistency check: initial point equals vacuum_from_matter at emission
-F0_vfm = osc.initial_mass_composition(
+F0_vfm = initialMassComposition(osc,
     alpha=0, basis="vacuum_from_matter", E_GeV=E_GeV, profile=sol, r_emit_km=r_emit
 )
 # np.testing.assert_allclose(F[0], F0_vfm, atol=1e-10)
@@ -80,5 +63,5 @@ plt.grid(True, which="both", alpha=0.3)
 plt.legend(frameon=False)
 plt.tight_layout()
 
-plt.savefig("./figures/adiabatic_sun_ssm_test.jpg", dpi=150) if not os.environ.get("CI") else None
+plt.savefig(str(figureDirectory / "adiabatic_sun_ssm_test.jpg"), dpi=150) if not os.environ.get("CI") else None
 plt.show()

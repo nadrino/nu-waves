@@ -1,10 +1,10 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 # examples/solar_daytime_upturn.py
 import os, numpy as np, matplotlib.pyplot as plt
 
 from nu_waves.sources.sun import SolarModel, SolarSource, R_SUN
 from nu_waves.matter.solar import (
     radial_nodes_and_weights_from_pdf,
-    exit_mass_fractions_averaged_over_radius,
     pee_day_from_exit_fractions,
     pee_lowE_vacuum_avg,
     pee_highE_msw,
@@ -12,15 +12,15 @@ from nu_waves.matter.solar import (
 from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.propagation.oscillator import Oscillator
+from nu_waves.hamiltonian import vacuum
+from Support.ExampleSupport import loadSolarProfile, exitMassFractionsAveraged
 from nu_waves.matter.solar import load_bs05_agsop # solar model
 
-# torch_backend = None
-torch_backend = make_torch_backend(seed=0, use_complex64=True)
 
 # --- 0) User knobs
 SOURCE = SolarSource.B8
-N_R_NODES = 24         # importance-sampled production radii
-N_STEPS_PER_RAY = 10  # steps along r->surface for the adiabatic solver
+N_R_NODES = sampleCount(24, 16)         # importance-sampled production radii
+N_STEPS_PER_RAY = sampleCount(10, 16)  # steps along r->surface for the adiabatic solver
 E_MIN_MeV, E_MAX_MeV, N_E = 0.1, 15.0, 50   # log-spaced energies
 
 
@@ -30,13 +30,13 @@ theta_12 = [33.68-0.70, 33.68+0.73]
 angles = {(1, 2): np.deg2rad(33.68), (1, 3): np.deg2rad(8.6), (2, 3): np.deg2rad(49)}
 phases = {(1, 3): np.deg2rad(195)}
 
-spec = Spectrum(n_neutrinos=3, m_lightest=0.)
-spec._generate_dm2_matrix({(2, 1): 7.42e-5, (3, 2): 0.0024428})
+spec = Spectrum(n_neutrinos=3, dm2={(2, 1): 7.42e-5, (3, 2): 0.0024428})
 
-U = Mixing(n_neutrinos=3, mixing_angles=angles, dirac_phases=phases).build_mixing_matrix()
-osc = Oscillator(mixing_matrix=U, m2_list=spec.get_m2(), backend=torch_backend)
+mixing = Mixing(n_neutrinos=3, mixing_angles=angles, dirac_phases=phases)
+U = mixing.build_mixing_matrix()
+osc = Oscillator(vacuum.Hamiltonian(mixing, spec, False))
 
-sol = load_bs05_agsop("./data/ssm/bs05_agsop.dat")
+sol = loadSolarProfile()
 
 E_MeV = np.logspace(np.log10(E_MIN_MeV), np.log10(E_MAX_MeV), N_E)
 E_GeV = 1e-3 * E_MeV
@@ -49,7 +49,7 @@ def main():
     plt.figure(figsize=(6.8, 4.2))
 
     # Exit mass fractions p_i(E) averaged over production radius
-    p_mass = exit_mass_fractions_averaged_over_radius(
+    p_mass = exitMassFractionsAveraged(
         osc, sol, E_GeV, r_nodes, w_nodes, n_steps_per_ray=N_STEPS_PER_RAY
     )  # shape (N_E, 3)
 

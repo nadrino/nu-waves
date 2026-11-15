@@ -86,13 +86,17 @@ class ConstantMatterOptimizedExecutor(GroupedEventExecutor):
         return vacuum, tangent, potentialTangent
 
     def amplitude(self, group, length, energy, model):
-        vacuum, tangent, potentialTangent = model
-        rho, fraction = self.hamiltonian.constantDensity
-        propagator, derivatives = self.hamiltonian.matterEvolution(
-            length, 0.5 / energy, vacuum, rho, fraction,
-            group.isAntiNu, tangent, potentialTangent)
+        propagator, derivatives = self.evolution(length, energy, model, group.isAntiNu)
         a, b = group.flavor_emit, group.flavor_det
         return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
+
+    def evolution(self, length, energy, model, antineutrino):
+        """Compute all channels once, allowing a CP flag per event."""
+        vacuum, tangent, potentialTangent = model
+        rho, fraction = self.hamiltonian.constantDensity
+        return self.hamiltonian.matterEvolution(
+            length, 0.5 / energy, vacuum, rho, fraction,
+            antineutrino, tangent, potentialTangent)
 
     def probabilityCompiled(self, compiled_batch):
         from nu_waves.hamiltonian.executors import evaluateCompiled
@@ -156,12 +160,10 @@ class LayeredMatterExecutor(ConstantMatterOptimizedExecutor):
                 for index, layer in enumerate(self.hamiltonian._matter_profile.layers)]
         return vacuum, tangent, potentials
 
-    def amplitude(self, group, length, energy, model):
+    def evolution(self, length, energy, model, antineutrino):
         vacuum, tangent, potentials = model
-        propagator, derivatives = self.hamiltonian.profileEvolution(
-            length, 0.5 / energy, vacuum, group.isAntiNu, tangent, potentials)
-        a, b = group.flavor_emit, group.flavor_det
-        return propagator[:, b, a], (None if derivatives is None else [d[:, b, a] for d in derivatives])
+        return self.hamiltonian.profileEvolution(
+            length, 0.5 / energy, vacuum, antineutrino, tangent, potentials)
 
 
 class Hamiltonian(HamiltonianBase):
@@ -279,6 +281,36 @@ class Hamiltonian(HamiltonianBase):
             propagator = step @ propagator
         return propagator, derivatives
 
+    def matterEigensystem(self, inv2Energy, vacuum, rho, electronFraction, antineutrino=False):
+        """Build and diagonalize one matter Hamiltonian per event."""
+        xp = Backend.xp()
+        mixedSigns = getattr(antineutrino, 'ndim', 0) > 0
+        if mixedSigns:
+            anti = antineutrino[:, None, None]
+            sign = xp.where(anti, -1., 1.)
+            vacuum = xp.where(anti, xp.conjugate(vacuum), vacuum)
+        else:
+            sign = -1 if antineutrino else 1
+        if not mixedSigns and antineutrino:
+            vacuum = xp.conjugate(vacuum)
+        projector = xp.zeros((self.n_neutrinos, self.n_neutrinos), dtype=Backend.complex_dtype())
+        projector[0, 0] = VCOEFF_EV * rho * electronFraction
+        h = vacuum * inv2Energy[:, None, None] + sign * projector
+        return self._eigh(h)
+
+    def matterAmplitude(self, length, inv2Energy, vacuum, rho, electronFraction,
+                        antineutrino, rows, emit, detect):
+        """Evaluate one channel per event without building full propagators.
+
+        V contains eigenvectors in columns. The requested S[b,a] is the
+        spectral sum V[b,i] exp(-i lambda[i] L) conj(V[a,i]). This path is for
+        constant matter and probability-only evaluation; layers need composition.
+        """
+        xp = Backend.xp()
+        values, vectors = self.matterEigensystem(inv2Energy, vacuum, rho, electronFraction, antineutrino)
+        phases = xp.exp(-1j * values * length[:, None])
+        return xp.sum(vectors[rows, detect, :] * phases * xp.conjugate(vectors[rows, emit, :]), axis=-1)
+
     def matterEvolution(self, length, inv2Energy, vacuum, rho, electronFraction,
                         antineutrino=False, vacuumTangent=None, potentialTangent=None):
         """Return propagator and optional tangents, sharing the eigendecomposition.
@@ -290,20 +322,20 @@ class Hamiltonian(HamiltonianBase):
         latter receives the antineutrino sign here, without energy scaling.
         """
         xp = Backend.xp()
-        sign = -1 if antineutrino else 1
-        if antineutrino:
-            vacuum = xp.conjugate(vacuum)
-        projector = xp.zeros(vacuum.shape, dtype=Backend.complex_dtype())
-        projector[0, 0] = sign * VCOEFF_EV * rho * electronFraction
-        h = vacuum[None, ...] * inv2Energy[:, None, None] + projector[None, ...]
-        values, vectors = self._eigh(h)
+        values, vectors = self.matterEigensystem(inv2Energy, vacuum, rho, electronFraction, antineutrino)
+        mixedSigns = getattr(antineutrino, 'ndim', 0) > 0
+        if mixedSigns:
+            anti = antineutrino[:, None, None]
+            sign = xp.where(anti, -1., 1.)
+        else:
+            sign = -1 if antineutrino else 1
         adjoint = xp.matrix_transpose(xp.conjugate(vectors))
         phaseValues = values * length[:, None]
         phases = xp.exp(-1j * phaseValues)
         propagator = (vectors * phases[:, None, :]) @ adjoint
         if vacuumTangent is None:
             return propagator, None
-        if antineutrino:
+        if not mixedSigns and antineutrino:
             vacuumTangent = xp.conjugate(vacuumTangent)
         if vacuumTangent.shape[0] == 0:
             return propagator, []
@@ -312,7 +344,10 @@ class Hamiltonian(HamiltonianBase):
         kernel = -1j * length[:, None, None] * xp.exp(-1j * midpoints) * xp.sinc(halfGaps / 3.141592653589793)
         tangents = []
         for column in range(vacuumTangent.shape[0]):
-            hTangent = vacuumTangent[column] * inv2Energy[:, None, None]
+            tangent = vacuumTangent[column]
+            if mixedSigns:
+                tangent = xp.where(anti, xp.conjugate(tangent), tangent)
+            hTangent = tangent * inv2Energy[:, None, None]
             if potentialTangent is not None:
                 hTangent = hTangent + sign * potentialTangent[column]
             spectral = adjoint @ hTangent @ vectors

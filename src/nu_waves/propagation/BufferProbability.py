@@ -1,13 +1,29 @@
 """Caller-owned event/output storage for Oscillator's probability interface."""
 
 from contextlib import nullcontext
-from types import SimpleNamespace
 import sys
 
 import numpy as np
 
 from nu_waves.globals.backend import Backend
 from nu_waves.utils.units import KM_TO_EVINV, GEV_TO_EV
+
+
+def modelSnapshot(value):
+    """Exact value key for small model data; never inspect the event arrays.
+
+    Opt-in result caching deliberately permits host synchronization of model
+    tensors. Tensor identity/version alone cannot detect external buffer writes.
+    """
+    if isinstance(value, dict):
+        return tuple((key, modelSnapshot(item)) for key, item in value.items())
+    if isinstance(value, (tuple, list)):
+        return tuple(modelSnapshot(item) for item in value)
+    if hasattr(value, 'detach'):
+        value = value.detach().resolve_conj().resolve_neg().cpu().numpy()
+    if isinstance(value, np.ndarray):
+        return (str(value.dtype), value.shape, value.tobytes())
+    return value
 
 
 def findDeviceInput(oscillator, *values):
@@ -199,6 +215,21 @@ def evaluateBuffers(oscillator, events, output, parameterBasis, gradientOutput):
             anti = eventArray(anti, Backend.real_dtype()) > 0.5
         executor = hamiltonian.makeExecutor(oscillator)
         prepared = executor.prepareModel(model, basis) if matter else model
+        cache = events._probabilityCache if events.cacheProbability else None
+        if cache is not None:
+            profile = getattr(hamiltonian, '_matter_profile', None)
+            matterState = (getattr(hamiltonian, '_constant_profile', None) if profile is None else
+                           (profile.slicing, [(layer.rho_in_g_per_cm3, layer.Ye, layer.weight)
+                                              for layer in profile.layers]))
+            # Include prepared tangents: equal probabilities do not imply equal
+            # derivatives, especially for parameterized matter profiles.
+            key = (type(hamiltonian), output.shape, str(output.dtype), str(device),
+                   hamiltonian._antineutrino, basis, modelSnapshot(prepared), modelSnapshot(matterState))
+            if cache.get('key') == key:
+                output[...] = cache['probabilities']
+                if gradients is not None:
+                    gradients[...] = cache['gradients']
+                return output if basis is None else (output, gradients)
         for start in range(0, output.shape[0], 65536):
             sl = slice(start, start + 65536)
             length = lengthInput[sl] * KM_TO_EVINV
@@ -212,15 +243,28 @@ def evaluateBuffers(oscillator, events, output, parameterBasis, gradientOutput):
                     for column, tangent in enumerate(tangents):
                         gradients[sl, column] = probabilityGradient(amplitude, tangent)
             else:
-                # Fixed channel loops avoid device mask reads or CPU grouping.
-                for sign in (False, True):
-                    for a in range(hamiltonian.n_neutrinos):
-                        for b in range(hamiltonian.n_neutrinos):
-                            group = SimpleNamespace(isAntiNu=sign, flavor_emit=a, flavor_det=b)
-                            amplitude, tangents = executor.amplitude(group, length, energy, prepared)
-                            mask = (anti[sl] == sign) & (emit[sl] == a) & (detect[sl] == b)
-                            output[sl] = xp.where(mask, xp.abs(amplitude) ** 2, output[sl])
-                            if gradients is not None:
-                                for column, tangent in enumerate(tangents):
-                                    gradients[sl, column] = xp.where(mask, probabilityGradient(amplitude, tangent), gradients[sl, column])
+                # One eigendecomposition per event (and layer), irrespective of
+                # flavor channel. Mixed CP flags stay entirely on the device.
+                rows = (np.arange(length.shape[0]) if numpyMode else
+                        torch.arange(length.shape[0], device=device))
+                if basis is None and hamiltonian._matter_profile is None:
+                    rho, fraction = hamiltonian.constantDensity
+                    amplitude = hamiltonian.matterAmplitude(
+                        length, 0.5 / energy, prepared[0], rho, fraction,
+                        anti[sl], rows, emit[sl], detect[sl])
+                    tangents = None
+                else:
+                    propagator, tangents = executor.evolution(length, energy, prepared, anti[sl])
+                    amplitude = propagator[rows, detect[sl], emit[sl]]
+                output[sl] = xp.abs(amplitude) ** 2
+                if gradients is not None:
+                    for column, tangent in enumerate(tangents):
+                        gradients[sl, column] = probabilityGradient(
+                            amplitude, tangent[rows, detect[sl], emit[sl]])
+        if cache is not None:
+            # Retain independent storage: callers may overwrite output buffers
+            # or request a different output view on the next evaluation.
+            cache.clear()
+            cache.update(key=key, probabilities=xp.copy(output),
+                         gradients=None if gradients is None else xp.copy(gradients))
         return output if basis is None else (output, gradients)

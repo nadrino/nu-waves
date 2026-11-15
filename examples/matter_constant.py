@@ -1,3 +1,4 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import os
 import matplotlib.pyplot as plt
@@ -10,8 +11,6 @@ from nu_waves.globals.backend import Backend
 import nu_waves.utils.flavors as flavors
 import nu_waves.utils.style
 
-import torch
-Backend.set_api(torch, device='mps')
 
 # import jax
 # Backend.set_api(jax, device='mps')
@@ -61,7 +60,7 @@ np.testing.assert_allclose(delta, 0, atol=1e-7)
 # --- DUNE-like configuration ---
 L_km = 1300.0                  # Fermilab → SURF
 rho_gcm3, Ye = 2.8, 0.5        # average crust density and electron fraction
-E = np.linspace(Emin, Emax, 600) # GeV
+E = np.linspace(Emin, Emax, sampleCount(600)) # GeV
 
 # --- Vacuum probabilities ---
 # h_matter.set_constant_density(rho_in_g_per_cm3=rho_gcm3, Ye=0.5)
@@ -91,7 +90,7 @@ plt.xlim(E.min(), E.max())
 plt.ylim(0, 0.3)
 plt.legend(ncol=2, frameon=False)
 plt.tight_layout()
-plt.savefig("./figures/matter_vacuum_vs_matter.jpg", dpi=150)  if not os.environ.get("CI") else None
+plt.savefig(str(figureDirectory / "matter_vacuum_vs_matter.jpg"), dpi=150)  if not os.environ.get("CI") else None
 plt.show()
 
 
@@ -112,6 +111,6 @@ plt.ylim(bottom=0)
 plt.legend(ncol=2, frameon=False)
 plt.tight_layout()
 
-plt.savefig("./figures/matter_constant_test.jpg", dpi=150)  if not os.environ.get("CI") else None
+plt.savefig(str(figureDirectory / "matter_constant_test.jpg"), dpi=150)  if not os.environ.get("CI") else None
 plt.show()
 

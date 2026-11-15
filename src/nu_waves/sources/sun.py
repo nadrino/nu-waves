@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Tuple, Callable, Optional, Dict
 import numpy as np
+integrateTrapezoid = getattr(np, 'trapezoid', None) or np.trapz
 
 from nu_waves.utils.units import R_SUN
 
@@ -41,7 +42,7 @@ class SolarModel:
         # --- Energy spectra (normalized internally)
         def _normalize(x, pdf):
             y = pdf(x)
-            area = np.trapz(y, x)
+            area = integrateTrapezoid(y, x)
             return lambda z: pdf(z) / area if area > 0 else lambda z: np.zeros_like(z)
 
         # pp: ~phase-space-like up to 0.42 MeV
@@ -90,7 +91,7 @@ class SolarModel:
         #         return beta_core(x, a, b)
         #     # normalize numerically
         #     rr = np.linspace(0, R_SUN, 2000)
-        #     norm = np.trapz(_raw(rr), rr)
+        #     norm = integrateTrapezoid(_raw(rr), rr)
         #     return lambda r: _raw(r) / norm if norm > 0 else (lambda r: 0*r)
         #
         # # Rough shapes (tunable):
@@ -119,7 +120,7 @@ class SolarModel:
                 return y
 
             rr = np.linspace(0, R_SUN, 3000)
-            norm = np.trapz(_raw_r(rr), rr)
+            norm = integrateTrapezoid(_raw_r(rr), rr)
             return (lambda r_km: _raw_r(r_km) / norm if norm > 0 else (lambda r_km: 0 * r_km))
 
         # Peaks informed by SSM intuition: B8 most central, Be7 central, pp broadest.
@@ -194,7 +195,7 @@ class SolarModel:
         fE = self.spectrum_pdf(source, E)       # (nE,)
         f = np.outer(fr, fE)                    # (nr, nE)
         # normalize to 1 over r,E
-        norm = np.trapz(np.trapz(f, E, axis=1), r)
+        norm = integrateTrapezoid(integrateTrapezoid(f, E, axis=1), r)
         f /= norm if norm > 0 else 1.0
         R, EE = np.meshgrid(r, E, indexing="ij")
         return R, EE, f

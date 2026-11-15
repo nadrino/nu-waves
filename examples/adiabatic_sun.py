@@ -1,28 +1,23 @@
+from Support.ExampleSupport import figureDirectory, dataDirectory, sampleCount
 import numpy as np
 import matplotlib.pyplot as plt
 
 from nu_waves.models.mixing import Mixing
 from nu_waves.models.spectrum import Spectrum
 from nu_waves.propagation.oscillator import Oscillator
+from nu_waves.hamiltonian import vacuum
+from Support.ExampleSupport import adiabaticMassFractions, initialMassComposition, loadSolarProfile, solarHamiltonians
 from nu_waves.matter.solar import SolarProfile
 
-# toggle for CPU/GPU
-torch_backend = None
-# torch_backend = make_torch_mps_backend(seed=0, use_complex64=True)
 
 # 3 flavors PMNS, PDG values (2025)
 angles = {(1, 2): np.deg2rad(33.4), (1, 3): np.deg2rad(8.6), (2, 3): np.deg2rad(49)}
 phases = {(1, 3): np.deg2rad(195)}
 
 # Masses, normal ordering
-spec = Spectrum(n_neutrinos=3, m_lightest=0.)
-spec._generate_dm2_matrix({(2, 1): 7.42e-5, (3, 2): 0.0024428})
+spec = Spectrum(n_neutrinos=3, dm2={(2, 1): 7.42e-5, (3, 2): 0.0024428})
 
-osc = Oscillator(
-    mixing_matrix=Mixing(n_neutrinos=3, mixing_angles=angles, dirac_phases=phases).build_mixing_matrix(),
-    m2_list=spec.get_m2(),
-    backend=torch_backend
-)
+osc = Oscillator(vacuum.Hamiltonian(Mixing(n_neutrinos=3, mixing_angles=angles, dirac_phases=phases), spec, False))
 
 
 sol = SolarProfile()
@@ -31,16 +26,16 @@ E_GeV = 0.010  # 10 MeV
 
 # neutrino start
 r_emit = 0.01 * sol.R_sun_km
-s = np.concatenate(([0.0], np.geomspace(1.0, sol.R_sun_km - r_emit, 799)))  # km (include 0)
+s = np.concatenate(([0.0], np.geomspace(1.0, sol.R_sun_km - r_emit, sampleCount(799))))  # km (include 0)
 
-F0_vac = osc.initial_mass_composition(alpha=0, basis="vacuum")
+F0_vac = initialMassComposition(osc, alpha=0, basis="vacuum")
 print(f"F0 vacuum: {F0_vac}")
-F0_m   = osc.initial_mass_composition(alpha=0, basis="matter", E_GeV=0.010, profile=sol, r_emit_km=r_emit)
+F0_m   = initialMassComposition(osc, alpha=0, basis="matter", E_GeV=0.010, profile=sol, r_emit_km=r_emit)
 print(f"F0 m: {F0_m}")
-F0_vfm = osc.initial_mass_composition(alpha=0, basis="vacuum_from_matter", E_GeV=0.010, profile=sol, r_emit_km=r_emit)
+F0_vfm = initialMassComposition(osc, alpha=0, basis="vacuum_from_matter", E_GeV=0.010, profile=sol, r_emit_km=r_emit)
 print(f"F0 vfm: {F0_vfm}")
 
-F = osc.adiabatic_mass_fractions_from_emission(
+F = adiabaticMassFractions(osc,
     E_GeV=E_GeV,
     profile=sol,
     r_emit_km=r_emit,
