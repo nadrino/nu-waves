@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark constant-density matter probabilities under fitter parameter updates."""
+"""Benchmark vacuum or constant-density matter under fitter parameter updates."""
 
 from itertools import combinations
 from dataclasses import replace
@@ -19,19 +19,23 @@ nominalValues = np.array([.5872523687443223, .14819001778459273, .81341281875519
 parameterSteps = np.array([.005, .002, .01, .05, 1e-6, 2e-5])
 
 
-def makeOscillator(parameters, density, electronFraction):
-    from nu_waves.hamiltonian import matter
+def makeOscillator(parameters, density, electronFraction, hamiltonianType="matter"):
+    from nu_waves.hamiltonian import matter, vacuum
     from nu_waves.models.mixing import Mixing
     from nu_waves.models.spectrum import Spectrum
     from nu_waves.propagation.oscillator import Oscillator
 
     # Keep live scalar views into the parameter buffer, including with NumPy.
     p = [parameters[i:i + 1].reshape(()) for i in range(6)]
-    hamiltonian = matter.Hamiltonian(
+    if hamiltonianType not in ("matter", "vacuum"):
+        raise ValueError(f"Unknown Hamiltonian type: {hamiltonianType}")
+    model = matter if hamiltonianType == "matter" else vacuum
+    hamiltonian = model.Hamiltonian(
         Mixing(3, {(1, 2): p[0], (1, 3): p[1], (2, 3): p[2]}, {(1, 3): p[3]}),
         Spectrum(3, {(2, 1): p[4], (3, 2): p[5]}), False)
-    hamiltonian.set_constant_density(density, Ye=electronFraction)
-    hamiltonian.enableConstantMatterBatchOptimization = True
+    if hamiltonianType == "matter":
+        hamiltonian.set_constant_density(density, Ye=electronFraction)
+        hamiltonian.enableConstantMatterBatchOptimization = True
     return Oscillator(hamiltonian)
 
 
@@ -65,7 +69,7 @@ def runBenchmark(events, args):
         if hasattr(events, 'invalidateCache'):
             events.invalidateCache()
         parameters[...] = convert(nominalValues)
-        oscillator = makeOscillator(parameters, args.density, args.electronFraction)
+        oscillator = makeOscillator(parameters, args.density, args.electronFraction, getattr(args, 'hamiltonian', 'matter'))
         # Alternate proposals around nominal: no drift and every changing call
         # changes exactly the named coordinates, including after warmup.
         proposals = []
@@ -81,7 +85,7 @@ def runBenchmark(events, args):
             start = time.perf_counter()
             parameters[...] = proposal
             if args.modelLifetime == "rebuild":
-                oscillator = makeOscillator(parameters, args.density, args.electronFraction)
+                oscillator = makeOscillator(parameters, args.density, args.electronFraction, getattr(args, 'hamiltonian', 'matter'))
             oscillator.probability(events, outputBuffer=output)
             synchronize()
             elapsed = time.perf_counter() - start
@@ -110,6 +114,7 @@ def main():
     parser = makeParser()
     parser.description = __doc__
     parser.set_defaults(device="cuda")
+    parser.add_argument("--hamiltonian", choices=["matter", "vacuum"], default="matter")
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--density", type=float, default=2.6, help="Constant density in g/cm^3")
@@ -140,7 +145,7 @@ def main():
     if args.output:
         np.savez(args.output, L_km=np.full(stats["loaded"], args.baselineKm, dtype=args.dtype), **arrays)
     metadata = dict(nuWavesPath=nu_waves.__file__, python=platform.python_version(), numpy=np.__version__,
-                    device=args.device, dtype=args.dtype, modelLifetime=args.modelLifetime,
+                    device=args.device, dtype=args.dtype, modelLifetime=args.modelLifetime, hamiltonian=args.hamiltonian,
                     density=args.density, electronFraction=args.electronFraction, baselineKm=args.baselineKm,
                     warmup=args.warmup, repeats=args.repeats, counts=stats,
                     nominalParameters=dict(zip(parameterNames, nominalValues.tolist())),

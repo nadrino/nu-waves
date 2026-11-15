@@ -1,5 +1,32 @@
 # OA2026 event loading
 
+## Vacuum benchmark and profiling
+
+Both `BenchmarkGundam.py` and `ProfileGundam.py` accept
+`--hamiltonian vacuum`; the default remains `matter` for existing commands.
+The vacuum option constructs an actual vacuum Hamiltonian, without calling
+the matter implementation at zero density. Density and electron fraction
+options have no physical effect in vacuum.
+
+```bash
+python benchmarks/ProfileGundam.py \
+  --dataset-list /path/to/gundam/config/dataset/datasetList.yaml \
+  --nu-waves-path ./ --device cuda --hamiltonian vacuum \
+  --cache-probability --cases all unchanged mass mixing \
+  --warmup 5 --repeats 30 --iterations 3 --profile-dir VacuumProfile
+```
+
+This loads the ROOT inputs once, measures each case without profiling, then
+exports traces/tables with additional `vacuumAmplitude` and `vacuumPhases`
+scopes. There is no eigensolver in this path; the traces can identify phase
+exponentials, channel coefficient selection, reductions and launch overhead.
+The cached `unchanged` case still prepares the small model before lookup.
+Return the complete `VacuumProfile` directory for analysis.
+
+For all 23 parameter-update cases without profiler instrumentation, use
+`BenchmarkGundam.py --hamiltonian vacuum` with the usual input options,
+`--cache-probability`, and `--report VacuumBenchmark.json`.
+
 ## CUDA eigensolver batch-size sweep
 
 ```bash

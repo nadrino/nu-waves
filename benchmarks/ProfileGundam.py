@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Profile resident matter batches with Torch; ROOT I/O and warmup are excluded."""
+"""Profile resident vacuum or matter batches; ROOT I/O and warmup are excluded."""
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from functools import wraps
@@ -20,6 +20,7 @@ def annotateStages():
     """Install profiling scopes temporarily, without changing production code."""
     import torch
     from nu_waves.hamiltonian.matter import Hamiltonian, ConstantMatterOptimizedExecutor
+    from nu_waves.hamiltonian.vacuum import Hamiltonian as VacuumHamiltonian
     from nu_waves.models.mixing import Mixing
     from nu_waves.models.spectrum import Spectrum
     from nu_waves.propagation import BufferProbability
@@ -37,10 +38,15 @@ def annotateStages():
                (Hamiltonian, 'matterEvolution', 'matterEvolution'),
                (Hamiltonian, 'matterAmplitude', 'matterAmplitude'),
                (Hamiltonian, '_eigh', 'eigendecomposition'),
+               (VacuumHamiltonian, 'vacuumAmplitude', 'vacuumAmplitude'),
+               (VacuumHamiltonian, 'vacuumPhases', 'vacuumPhases'),
                (BufferProbability, 'modelSnapshot', 'cacheModelSnapshot')]
     with ExitStack() as stack:
         for owner, attribute, label in targets:
-            stack.enter_context(patch.object(owner, attribute, wrap(getattr(owner, attribute), label)))
+            wrapped = wrap(getattr(owner, attribute), label)
+            if isinstance(owner.__dict__.get(attribute), staticmethod):
+                wrapped = staticmethod(wrapped)
+            stack.enter_context(patch.object(owner, attribute, wrapped))
         yield
 
 
@@ -57,7 +63,7 @@ def profileCase(events, args, case, outputDirectory):
         values = nominalValues.copy()
         values[changed] += sign * parameterSteps[changed]
         proposals.append(torch.tensor(values, device=device, dtype=parameters.dtype))
-    oscillator = makeOscillator(parameters, args.density, args.electronFraction)
+    oscillator = makeOscillator(parameters, args.density, args.electronFraction, args.hamiltonian)
     iteration = 0
 
     def evaluate(annotated=False):
@@ -70,13 +76,13 @@ def profileCase(events, args, case, outputDirectory):
                 parameters.copy_(proposal)
             if args.modelLifetime == 'rebuild':
                 with torch.profiler.record_function('nuWaves::constructOscillator'):
-                    oscillator = makeOscillator(parameters, args.density, args.electronFraction)
+                    oscillator = makeOscillator(parameters, args.density, args.electronFraction, args.hamiltonian)
             with torch.profiler.record_function('nuWaves::probability'):
                 oscillator.probability(events, outputBuffer=weights)
         else:
             parameters.copy_(proposal)
             if args.modelLifetime == 'rebuild':
-                oscillator = makeOscillator(parameters, args.density, args.electronFraction)
+                oscillator = makeOscillator(parameters, args.density, args.electronFraction, args.hamiltonian)
             oscillator.probability(events, outputBuffer=weights)
 
     events.invalidateCache()
@@ -133,7 +139,8 @@ def main():
     parser = makeParser()
     parser.description = __doc__
     parser.set_defaults(device='cuda')
-    parser.add_argument('--profile-dir', dest='profileDir', default='MatterProfile')
+    parser.add_argument('--profile-dir', dest='profileDir')
+    parser.add_argument('--hamiltonian', choices=['matter', 'vacuum'], default='matter')
     parser.add_argument('--cases', nargs='+', choices=['all', 'unchanged', 'mass', 'mixing'], default=['all', 'unchanged'])
     parser.add_argument('--iterations', type=int, default=3, help='Captured evaluations per case')
     parser.add_argument('--warmup', type=int, default=3)
@@ -145,6 +152,8 @@ def main():
     parser.add_argument('--record-shapes', dest='recordShapes', action='store_true')
     parser.add_argument('--profile-memory', dest='profileMemory', action='store_true')
     args = parser.parse_args()
+    if args.profileDir is None:
+        args.profileDir = 'VacuumProfile' if args.hamiltonian == 'vacuum' else 'MatterProfile'
     validateArgs(parser, args)
     if args.output:
         parser.error('--output is not used here; use LoadGundamEvents.py for NPZ exports')
